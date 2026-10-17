@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>WerkBüro</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <header>
+    <div class="head-inner">
+      <div class="brand">
+        <h1>Werk<b>Büro</b></h1>
+        <span class="company"><span id="company-name"></span> · <span id="store-status">Nur in diesem Browser</span></span>
+      </div>
+      <nav>
+        <button class="tab active" data-tab="dashboard">Übersicht</button>
+        <button class="tab" data-tab="offers">Angebote</button>
+        <button class="tab" data-tab="invoices">Rechnungen</button>
+        <button class="tab" data-tab="customers">Kunden</button>
+        <button class="tab" data-tab="catalog">Katalog</button>
+        <button class="tab" data-tab="settings">Mehr</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="dashboard" class="panel active"></section>
+    <section id="offers" class="panel"></section>
+    <section id="invoices" class="panel"></section>
+    <section id="customers" class="panel"></section>
+    <section id="catalog" class="panel"></section>
+    <section id="settings" class="panel">
+      <div class="card">
+        <h2>Firma</h2>
+        <p class="hint">Dein Name, Adresse und IBAN erscheinen in der Rechnungsvorschau.</p>
+        <button id="company-btn" class="secondary">Firmendaten bearbeiten</button>
+      </div>
+      <div class="card">
+        <h2>Backup</h2>
+        <p class="hint">Sichere alle Daten als Datei oder spiele ein Backup wieder ein.</p>
+        <div class="actions">
+          <button id="export-btn" class="secondary">Exportieren</button>
+          <label class="button secondary" for="import-input">Importieren <input id="import-input" type="file" accept="application/json,.json" hidden></label>
+        </div>
+        <div id="import-bar" class="actions" hidden>
+          <p id="import-text" class="hint"></p>
+          <button id="import-confirm">Ersetzen</button>
+          <button id="import-cancel" class="secondary">Abbrechen</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Hinweis</h2>
+        <p class="hint">WerkBüro ist zum Ausprobieren mit Beispieldaten. Die Rechnungsvorlage ersetzt keine geprüfte Buchhaltung. Ob eine Rechnung alle Pflichtangaben erfüllt, kläre mit einem Steuerberater.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="sheet-back" class="sheet-back" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-top">
+        <h3 id="sheet-title"></h3>
+        <button class="close" data-action="close" aria-label="Schließen">×</button>
+      </div>
+      <div id="sheet-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="src/core.js"></script>
+  <script src="src/seed.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

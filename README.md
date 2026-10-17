@@ -45,3 +45,21 @@ Danach die EA FC Web App öffnen. Unten rechts erscheint der Knopf „DT“.
 npm run build:damirtrade   # baut damirtrade/damirtrade.user.js
 npm test
 ```
+
+# WerkBüro
+
+Handwerker-Büro zum Ausprobieren (Browser und Handy, kein Server): Angebote und Rechnungen, inspiriert von Bosch OfficeOn. Startet mit Beispieldaten.
+
+- **Übersicht:** Umsatz (bezahlt), offene Posten, überfällige Beträge, offene Angebote, letzte Dokumente.
+- **Angebote / Rechnungen:** Positionen mit Menge, Einzelpreis und MwSt. (19/7/0 %), Netto, MwSt. je Satz und Brutto. Angebot per Klick in eine Rechnung umwandeln. Rechnungsvorschau.
+- **Kunden & Katalog:** Kundenliste und ein Material-/Leistungskatalog; Katalog-Einträge füllen Positionen automatisch aus.
+- **Mehr:** Firmendaten (erscheinen auf der Rechnung), Backup-Export/Import.
+
+Beträge werden in Cent gerechnet, damit es keine Rundungsfehler gibt. Die Rechnungsvorlage ist ein Muster und ersetzt keine geprüfte Buchhaltung.
+
+## Entwickeln
+
+```
+npm run build:werkbuero   # baut dist/werkbuero.html
+npm test
+```
