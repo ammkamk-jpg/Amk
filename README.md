@@ -19,3 +19,29 @@ Daten werden nur im Browser (localStorage) gespeichert.
 ```
 npm test
 ```
+
+# damirtrade
+
+Panel für die EA FC Web App (Userscript, läuft auch auf dem Handy). damirtrade **liest nur mit**: Es wertet deine eigenen Suchen, Käufe und die Transferliste aus. Suchen, kaufen und verkaufen machst du selbst.
+
+- **Live:** Ergebnisse deiner letzten Suche mit erwartetem Gewinn, Treffer mit Ton und Hinweis, Session-Statistik (Suchen, Treffer-Quote, Käufe, Ausgaben, Gewinn, Gewinn pro Stunde), Coin-Stand.
+- **Ziele:** Spielername, Wertung, „Kaufen bis“ und „Verkaufen für“ (oder Marktpreis aus deinen Suchen).
+- **Trades:** Käufe werden automatisch eingetragen, Verkäufe erkannt, sobald du die Transferliste öffnest. Export für FUT Trader.
+- **Optionen:** Mindestgewinn (Coins oder Prozent), Verkaufsprofil (Marge, Marktpreis minus Stufen, fester Preis), Budget, Kauf-Limit, Laufzeit-Limit, Pausen-Hinweis, Ton.
+- Warnt bei Soft-Ban (429), Captcha und abgelaufener Sitzung.
+
+## Installieren
+
+- **Android:** Firefox installieren → Add-on „Tampermonkey“ hinzufügen → diesen Link öffnen und „Installieren“ tippen:
+  https://raw.githubusercontent.com/ammkamk-jpg/Amk/master/damirtrade/damirtrade.user.js
+- **iPhone:** App „Userscripts“ aus dem App Store → in Safari unter „aA“ → Erweiterungen aktivieren → den Link oben öffnen und installieren.
+- **PC:** Tampermonkey in Chrome/Firefox → Link oben öffnen.
+
+Danach die EA FC Web App öffnen. Unten rechts erscheint der Knopf „DT“.
+
+## Entwickeln
+
+```
+npm run build:damirtrade   # baut damirtrade/damirtrade.user.js
+npm test
+```
