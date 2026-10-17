@@ -2,69 +2,86 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>FUT Trader</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
   <header>
-    <h1>FUT Trader</h1>
-    <nav>
-      <button class="tab active" data-tab="rechner">Rechner</button>
-      <button class="tab" data-tab="watchlist">Watchlist</button>
-      <button class="tab" data-tab="trades">Trades</button>
-    </nav>
+    <div class="head-inner">
+      <div class="brand">
+        <h1>FUT <span>Trader</span></h1>
+        <span id="storage-status">Nur in diesem Browser gespeichert</span>
+      </div>
+      <nav>
+        <button class="tab active" data-tab="rechner">Rechner</button>
+        <button class="tab" data-tab="watchlist">Watchlist</button>
+        <button class="tab" data-tab="trades">Trades</button>
+      </nav>
+    </div>
   </header>
 
   <main>
     <section id="rechner" class="panel active">
       <div class="card">
         <h2>Gewinn nach Steuer</h2>
-        <label>Kaufpreis <input id="calc-buy" type="number" inputmode="numeric" min="0" step="50" placeholder="z. B. 10000"></label>
-        <label>Verkaufspreis <input id="calc-sell" type="number" inputmode="numeric" min="0" step="50" placeholder="z. B. 12000"></label>
+        <div class="row">
+          <label for="calc-buy">Kaufpreis <input id="calc-buy" type="number" inputmode="numeric" min="0" step="50" value="10000"></label>
+          <label for="calc-sell">Verkaufspreis <input id="calc-sell" type="number" inputmode="numeric" min="0" step="50" value="12000"></label>
+        </div>
+        <div id="calc-headline" class="headline"></div>
         <dl id="calc-result" class="result"></dl>
       </div>
       <div class="card">
         <h2>Zielpreise</h2>
-        <label>Gewünschter Mindestgewinn <input id="calc-margin" type="number" inputmode="numeric" min="0" step="50" value="0"></label>
+        <label for="calc-margin">Gewünschter Mindestgewinn <input id="calc-margin" type="number" inputmode="numeric" min="0" step="50" value="500"></label>
         <dl id="calc-targets" class="result"></dl>
       </div>
-      <p class="hint">Gerechnet mit 5 % EA-Steuer und gültigen Preisstufen (50 / 100 / 250 / 500 / 1.000).</p>
+      <p class="hint">Gerechnet mit 5 % EA-Steuer. Preise springen in Stufen: bis 1.000 in 50ern, bis 10.000 in 100ern, bis 50.000 in 250ern, bis 100.000 in 500ern, darüber in 1.000ern.</p>
     </section>
 
     <section id="watchlist" class="panel">
       <form id="watch-form" class="card">
         <h2>Spieler beobachten</h2>
-        <label>Name <input name="name" required placeholder="z. B. Mbappé"></label>
-        <label>Version <input name="version" placeholder="z. B. Gold Rare, TOTW"></label>
+        <label for="watch-name">Name <input id="watch-name" name="name" required placeholder="z. B. Mbappé"></label>
+        <label for="watch-version">Version <input id="watch-version" name="version" placeholder="z. B. Gold Rare, TOTW"></label>
         <div class="row">
-          <label>Ziel-Kauf <input name="targetBuy" type="number" inputmode="numeric" min="0" step="50" required></label>
-          <label>Ziel-Verkauf <input name="targetSell" type="number" inputmode="numeric" min="0" step="50" required></label>
+          <label for="watch-buy">Ziel-Kauf <input id="watch-buy" name="targetBuy" type="number" inputmode="numeric" min="0" step="50" required></label>
+          <label for="watch-sell">Ziel-Verkauf <input id="watch-sell" name="targetSell" type="number" inputmode="numeric" min="0" step="50" required></label>
         </div>
-        <button type="submit">Hinzufügen</button>
+        <button type="submit">Zur Watchlist</button>
       </form>
-      <div id="watch-list"></div>
+      <div id="watch-list" class="stack"></div>
     </section>
 
     <section id="trades" class="panel">
+      <div id="trade-summary" class="card"></div>
       <form id="trade-form" class="card">
         <h2>Kauf eintragen</h2>
-        <label>Name <input name="name" required></label>
-        <label>Kaufpreis <input name="buy" type="number" inputmode="numeric" min="0" step="50" required></label>
+        <label for="trade-name">Spieler <input id="trade-name" name="name" required></label>
+        <label for="trade-buy">Kaufpreis <input id="trade-buy" name="buy" type="number" inputmode="numeric" min="0" step="50" required></label>
         <button type="submit">Eintragen</button>
       </form>
-      <div id="trade-summary" class="card"></div>
-      <div id="trade-list"></div>
+      <div id="trade-list" class="stack"></div>
       <div class="card">
-        <h2>Daten</h2>
-        <p class="hint">Alles wird nur in diesem Browser gespeichert. Exportiere regelmäßig ein Backup.</p>
+        <h2>Backup</h2>
+        <p class="hint">Sichere Watchlist und Trades als Datei oder spiele ein Backup wieder ein.</p>
         <div class="row">
-          <button id="export-btn" type="button">Exportieren</button>
-          <label class="button">Importieren <input id="import-input" type="file" accept="application/json" hidden></label>
+          <button id="export-btn" type="button" class="secondary">Exportieren</button>
+          <label class="button secondary" for="import-input">Importieren <input id="import-input" type="file" accept="application/json,.json" hidden></label>
+        </div>
+        <div id="import-bar" class="row" hidden>
+          <p id="import-text" class="hint"></p>
+          <button id="import-confirm" type="button">Ersetzen</button>
+          <button id="import-cancel" type="button" class="secondary">Abbrechen</button>
         </div>
       </div>
     </section>
   </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="src/fut.js"></script>
   <script src="src/app.js"></script>

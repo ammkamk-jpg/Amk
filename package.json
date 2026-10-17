@@ -2,8 +2,9 @@
   "name": "fut-trader",
   "version": "0.1.0",
   "private": true,
-  "description": "Hilfe für manuelles Traden im EA FC Ultimate Team Transfermarkt",
+  "description": "Hilfe f\u00fcr manuelles Traden im EA FC Ultimate Team Transfermarkt",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node scripts/build-artifact.js"
   }
 }
