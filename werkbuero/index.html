@@ -19,6 +19,8 @@
         <button class="tab active" data-tab="dashboard">Übersicht</button>
         <button class="tab" data-tab="offers">Angebote</button>
         <button class="tab" data-tab="invoices">Rechnungen</button>
+        <button class="tab" data-tab="appointments">Termine</button>
+        <button class="tab" data-tab="times">Zeiten</button>
         <button class="tab" data-tab="customers">Kunden</button>
         <button class="tab" data-tab="catalog">Katalog</button>
         <button class="tab" data-tab="settings">Mehr</button>
@@ -30,6 +32,8 @@
     <section id="dashboard" class="panel active"></section>
     <section id="offers" class="panel"></section>
     <section id="invoices" class="panel"></section>
+    <section id="appointments" class="panel"></section>
+    <section id="times" class="panel"></section>
     <section id="customers" class="panel"></section>
     <section id="catalog" class="panel"></section>
     <section id="settings" class="panel">
@@ -37,6 +41,11 @@
         <h2>Firma</h2>
         <p class="hint">Dein Name, Adresse und IBAN erscheinen in der Rechnungsvorschau.</p>
         <button id="company-btn" class="secondary">Firmendaten bearbeiten</button>
+      </div>
+      <div class="card">
+        <h2>Mitarbeiter</h2>
+        <p class="hint">Mitarbeiter stehen in Terminen und der Zeiterfassung zur Auswahl.</p>
+        <button id="team-btn" class="secondary">Mitarbeiter verwalten</button>
       </div>
       <div class="card">
         <h2>Backup</h2>
@@ -71,6 +80,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="src/core.js"></script>
+  <script src="src/time.js"></script>
   <script src="src/seed.js"></script>
   <script src="src/app.js"></script>
 </body>

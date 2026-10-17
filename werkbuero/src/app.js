@@ -8,10 +8,22 @@
 
   // ---------- Speicher ----------
 
+  // Sorgt dafür, dass auch ältere gespeicherte Daten die neuen Felder haben.
+  function normalize(s) {
+    s.team = s.team || [];
+    s.appointments = s.appointments || [];
+    s.times = s.times || [];
+    s.offers = s.offers || [];
+    s.invoices = s.invoices || [];
+    s.customers = s.customers || [];
+    s.catalog = s.catalog || [];
+    return s;
+  }
+
   function readLocal() {
     try {
       const data = JSON.parse(localStorage.getItem(LOCAL_KEY) || "null");
-      if (data && data.customers) return data;
+      if (data && data.customers) return normalize(data);
     } catch (e) { /* fällt auf Seed zurück */ }
     return WB_SEED.seed();
   }
@@ -51,7 +63,7 @@
       const doc = await ref.get();
       cloud.ref = ref;
       if (doc.exists && doc.data().data) {
-        state = doc.data().data;
+        state = normalize(doc.data().data);
         writeLocal();
       } else {
         persist();
@@ -73,6 +85,7 @@
   function todayIso() { return new Date().toISOString().slice(0, 10); }
   function deDate(iso) { return iso ? iso.split("-").reverse().join(".") : ""; }
   function customerName(id) { const c = state.customers.find((c) => c.id === id); return c ? c.name : "— Kunde gelöscht —"; }
+  function workerName(id) { const m = state.team.find((m) => m.id === id); return m ? m.name : "—"; }
 
   let toastTimer = null;
   function showToast(text) {
@@ -455,14 +468,22 @@
   document.addEventListener("click", (e) => {
     const neu = e.target.closest("[data-new]");
     if (neu) {
-      const map = { offer: () => openDoc("offer", null), invoice: () => openDoc("invoice", null), customer: () => openCustomer(null), item: () => openItem(null) };
+      const map = {
+        offer: () => openDoc("offer", null), invoice: () => openDoc("invoice", null),
+        customer: () => openCustomer(null), item: () => openItem(null),
+        appointment: () => openAppointment(null), time: () => openTime(null),
+      };
       map[neu.dataset.new]();
       return;
     }
     const open = e.target.closest("[data-open]");
     if (open) { openDoc(open.dataset.open, open.dataset.id); return; }
     const edit = e.target.closest("[data-edit]");
-    if (edit) { (edit.dataset.edit === "customer" ? openCustomer : openItem)(edit.dataset.id); return; }
+    if (edit) {
+      const editors = { customer: openCustomer, item: openItem, appointment: openAppointment, time: (id) => openTime(id) };
+      editors[edit.dataset.edit](edit.dataset.id);
+      return;
+    }
   });
 
   // Angebot-Sheet: Button "In Rechnung umwandeln" wird dort nicht gebraucht,
@@ -543,12 +564,227 @@
     });
   }
 
+  // ---------- Termine ----------
+
+  function renderAppointments() {
+    const groups = {};
+    for (const a of state.appointments) (groups[a.date] = groups[a.date] || []).push(a);
+    const dates = Object.keys(groups).sort();
+    const today = todayIso();
+
+    $("#appointments").innerHTML = `
+      <div class="actions"><button data-new="appointment">Neuer Termin</button></div>
+      ${dates.length ? dates.map((date) => `
+        <div class="card">
+          <h2>${deDate(date)}${date === today ? " · heute" : ""}</h2>
+          ${groups[date].sort((a, b) => (a.start || "").localeCompare(b.start || "")).map((a) => `
+            <div class="list-item" data-edit="appointment" data-id="${a.id}">
+              <div class="main">
+                <div class="name">${esc(a.title || "Termin")}</div>
+                <div class="sub">${esc(a.start || "")}${a.end ? "–" + esc(a.end) : ""} · ${esc(customerName(a.customerId))} · ${esc(workerName(a.workerId))}</div>
+              </div>
+              <button class="secondary small" data-book="${a.id}">Zeit buchen</button>
+            </div>`).join("")}
+        </div>`).join("")
+      : `<div class="card empty">Noch keine Termine.</div>`}`;
+  }
+
+  function openAppointment(id) {
+    const a = id ? state.appointments.find((x) => x.id === id) : null;
+    const d = a || { date: todayIso(), start: "08:00", end: "09:00", customerId: state.customers[0] ? state.customers[0].id : "", workerId: state.team[0] ? state.team[0].id : "", title: "", note: "" };
+    const custOpts = state.customers.map((c) => `<option value="${c.id}" ${c.id === d.customerId ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+    const teamOpts = state.team.map((m) => `<option value="${m.id}" ${m.id === d.workerId ? "selected" : ""}>${esc(m.name)}</option>`).join("");
+    openSheet(a ? "Termin bearbeiten" : "Neuer Termin", `
+      <label>Titel <input id="a-title" value="${esc(d.title)}" placeholder="z. B. Montage vor Ort"></label>
+      <div class="row">
+        <label>Datum <input id="a-date" type="date" value="${esc(d.date)}"></label>
+        <label>Von <input id="a-start" type="time" value="${esc(d.start)}"></label>
+        <label>Bis <input id="a-end" type="time" value="${esc(d.end)}"></label>
+      </div>
+      <div class="row">
+        <label>Kunde <select id="a-customer">${custOpts || `<option value="">—</option>`}</select></label>
+        <label>Mitarbeiter <select id="a-worker">${teamOpts || `<option value="">—</option>`}</select></label>
+      </div>
+      <label>Notiz <textarea id="a-note">${esc(d.note)}</textarea></label>
+      <div class="actions">
+        <button type="button" id="a-save">Speichern</button>
+        ${a ? `<button type="button" class="secondary" id="a-book">Zeit buchen</button>` : ""}
+        ${a ? `<button type="button" class="danger" id="a-del">Löschen</button>` : ""}
+      </div>`, null);
+    $("#a-save").addEventListener("click", () => {
+      const data = { title: $("#a-title").value.trim(), date: $("#a-date").value || todayIso(), start: $("#a-start").value, end: $("#a-end").value, customerId: $("#a-customer").value, workerId: $("#a-worker").value, note: $("#a-note").value.trim() };
+      if (a) Object.assign(a, data);
+      else state.appointments.push({ id: newId(), ...data });
+      persist(); closeSheet(); renderAll(); showToast("Termin gespeichert.");
+    });
+    if (a) {
+      $("#a-book").addEventListener("click", () => { closeSheet(); bookTimeFromAppointment(a); });
+      $("#a-del").addEventListener("click", (e) => {
+        if (!confirmTap(e.target)) return;
+        state.appointments = state.appointments.filter((x) => x !== a);
+        persist(); closeSheet(); renderAll();
+      });
+    }
+  }
+
+  // ---------- Zeiten ----------
+
+  function renderTimes() {
+    const T = WB_TIME;
+    const weekMin = T.minutesInWeek(state.times, todayIso());
+    const billableOpen = state.times.filter((t) => t.billable && !t.invoiced);
+    const openMin = T.sumMinutes(billableOpen);
+    const groups = T.groupByDate(state.times);
+
+    $("#times").innerHTML = `
+      <div class="stat-grid">
+        <div class="stat"><span class="k">Diese Woche</span><span class="v">${T.formatHours(weekMin)}</span></div>
+        <div class="stat"><span class="k">Abrechenbar offen</span><span class="v">${T.formatHours(openMin)}</span></div>
+      </div>
+      <div class="actions">
+        <button data-new="time">Zeit erfassen</button>
+        ${openMin ? `<button class="secondary" id="bill-times">Offene Zeiten abrechnen</button>` : ""}
+      </div>
+      ${groups.length ? groups.map((g) => `
+        <div class="card">
+          <h2>${deDate(g.date)} · ${T.formatHours(g.minutes)}</h2>
+          ${g.entries.map((t) => `
+            <div class="list-item" data-edit="time" data-id="${t.id}">
+              <div class="main">
+                <div class="name">${esc(customerName(t.customerId))}${t.note ? " · " + esc(t.note) : ""}</div>
+                <div class="sub">${esc(workerName(t.workerId))} · ${t.billable ? (t.invoiced ? "abgerechnet" : "abrechenbar") : "intern"}</div>
+              </div>
+              <div class="side"><span class="amount">${T.formatHours(t.minutes)}</span></div>
+            </div>`).join("")}
+        </div>`).join("")
+      : `<div class="card empty">Noch keine Zeiten erfasst.</div>`}`;
+  }
+
+  function bookTimeFromAppointment(a) {
+    const minutes = WB_TIME.duration(a.start, a.end, 0);
+    openTime(null, { date: a.date, customerId: a.customerId, workerId: a.workerId, minutes, note: a.title || "", billable: true });
+  }
+
+  function openTime(id, preset) {
+    const t = id ? state.times.find((x) => x.id === id) : null;
+    const d = t || preset || { date: todayIso(), customerId: state.customers[0] ? state.customers[0].id : "", workerId: state.team[0] ? state.team[0].id : "", minutes: 0, note: "", billable: true, invoiced: false };
+    const custOpts = state.customers.map((c) => `<option value="${c.id}" ${c.id === d.customerId ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+    const teamOpts = state.team.map((m) => `<option value="${m.id}" ${m.id === d.workerId ? "selected" : ""}>${esc(m.name)}</option>`).join("");
+    openSheet(t ? "Zeit bearbeiten" : "Zeit erfassen", `
+      <label>Datum <input id="z-date" type="date" value="${esc(d.date)}"></label>
+      <div class="row">
+        <label>Kunde / Auftrag <select id="z-customer">${custOpts || `<option value="">—</option>`}</select></label>
+        <label>Mitarbeiter <select id="z-worker">${teamOpts || `<option value="">—</option>`}</select></label>
+      </div>
+      <p class="hint">Dauer direkt in Stunden eingeben oder aus Von/Bis berechnen lassen.</p>
+      <div class="row">
+        <label>Stunden <input id="z-hours" inputmode="decimal" value="${d.minutes ? String(WB_TIME.hours(d.minutes)).replace(".", ",") : ""}"></label>
+        <label>Von <input id="z-start" type="time"></label>
+        <label>Bis <input id="z-end" type="time"></label>
+        <label>Pause Min. <input id="z-pause" inputmode="numeric" value="0"></label>
+      </div>
+      <button type="button" class="secondary small" id="z-calc">Aus Von/Bis berechnen</button>
+      <label>Notiz <textarea id="z-note">${esc(d.note)}</textarea></label>
+      <label class="check"><input type="checkbox" id="z-billable" ${d.billable ? "checked" : ""}> Abrechenbar</label>
+      ${t && t.invoiced ? `<p class="hint">Diese Zeit wurde bereits in eine Rechnung übernommen.</p>` : ""}
+      <div class="actions">
+        <button type="button" id="z-save">Speichern</button>
+        ${t ? `<button type="button" class="danger" id="z-del">Löschen</button>` : ""}
+      </div>`, null);
+    $("#z-calc").addEventListener("click", () => {
+      const min = WB_TIME.duration($("#z-start").value, $("#z-end").value, parseInt($("#z-pause").value, 10) || 0);
+      if (!min) return showToast("Bitte gültige Von/Bis-Zeiten eingeben.");
+      $("#z-hours").value = String(WB_TIME.hours(min)).replace(".", ",");
+    });
+    $("#z-save").addEventListener("click", () => {
+      const h = parseFloat(String($("#z-hours").value).replace(",", ".")) || 0;
+      const minutes = Math.round(h * 60);
+      if (minutes <= 0) return showToast("Bitte Stunden eingeben.");
+      const data = { date: $("#z-date").value || todayIso(), customerId: $("#z-customer").value, workerId: $("#z-worker").value, minutes, note: $("#z-note").value.trim(), billable: $("#z-billable").checked };
+      if (t) Object.assign(t, data);
+      else state.times.push({ id: newId(), invoiced: false, ...data });
+      persist(); closeSheet(); renderAll(); showToast("Zeit gespeichert.");
+    });
+    if (t) $("#z-del").addEventListener("click", (e) => {
+      if (!confirmTap(e.target)) return;
+      state.times = state.times.filter((x) => x !== t);
+      persist(); closeSheet(); renderAll();
+    });
+  }
+
+  // Offene abrechenbare Zeiten je Kunde in Rechnungen verwandeln.
+  function billOpenTimes() {
+    const groups = WB_TIME.billableToPositions(state.times, state.company.hourlyRate);
+    if (!groups.length) return showToast("Keine offenen abrechenbaren Zeiten.");
+    let created = 0;
+    for (const g of groups) {
+      const number = WB.nextNumber(state.invoices.map((i) => i.number), null, null);
+      state.invoices.unshift({
+        id: newId(), kind: "invoice", number, customerId: g.customerId, date: todayIso(),
+        status: "offen", note: "Erfasste Arbeitszeit.", fromOffer: null, positions: [g.position],
+      });
+      created += 1;
+    }
+    // Übernommene Zeiten als abgerechnet markieren.
+    for (const t of state.times) if (t.billable && !t.invoiced) t.invoiced = true;
+    persist(); renderAll();
+    showToast(`${created} Rechnung(en) aus Zeiten erstellt.`);
+    document.querySelector('.tab[data-tab="invoices"]').click();
+  }
+
+  $("#times").addEventListener("click", (e) => {
+    if (e.target.id === "bill-times") billOpenTimes();
+  });
+  $("#appointments").addEventListener("click", (e) => {
+    const book = e.target.closest("[data-book]");
+    if (!book) return;
+    e.stopPropagation();
+    const a = state.appointments.find((x) => x.id === book.dataset.book);
+    if (a) bookTimeFromAppointment(a);
+  });
+
+  // ---------- Mitarbeiter ----------
+
+  $("#team-btn").addEventListener("click", openTeam);
+
+  function openTeam() {
+    openSheet("Mitarbeiter", `
+      <div id="team-list">${teamListHtml()}</div>
+      <div class="row">
+        <input id="team-new" placeholder="Name" aria-label="Neuer Mitarbeiter">
+        <button type="button" id="team-add">Hinzufügen</button>
+      </div>
+      <div class="actions"><button type="button" class="secondary" data-action="close">Fertig</button></div>`, null);
+    const refresh = () => { $("#team-list").innerHTML = teamListHtml(); };
+    $("#team-add").addEventListener("click", () => {
+      const name = $("#team-new").value.trim();
+      if (!name) return;
+      state.team.push({ id: newId(), name });
+      $("#team-new").value = "";
+      persist(); refresh(); renderAll();
+    });
+    $("#team-list").addEventListener("click", (e) => {
+      const del = e.target.closest("[data-team-del]");
+      if (!del) return;
+      state.team = state.team.filter((m) => m.id !== del.dataset.teamDel);
+      persist(); refresh(); renderAll();
+    });
+  }
+
+  function teamListHtml() {
+    return state.team.length
+      ? state.team.map((m) => `<div class="list-item"><div class="main"><div class="name">${esc(m.name)}</div></div><button class="danger small" data-team-del="${m.id}">Entfernen</button></div>`).join("")
+      : `<p class="hint">Noch keine Mitarbeiter.</p>`;
+  }
+
   // ---------- Rendern ----------
 
   function renderAll() {
     renderDashboard();
     renderDocList("offer");
     renderDocList("invoice");
+    renderAppointments();
+    renderTimes();
     renderCustomers();
     renderCatalog();
     enhanceOfferList();

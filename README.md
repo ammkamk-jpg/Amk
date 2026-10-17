@@ -52,6 +52,9 @@ Handwerker-Büro zum Ausprobieren (Browser und Handy, kein Server): Angebote und
 
 - **Übersicht:** Umsatz (bezahlt), offene Posten, überfällige Beträge, offene Angebote, letzte Dokumente.
 - **Angebote / Rechnungen:** Positionen mit Menge, Einzelpreis und MwSt. (19/7/0 %), Netto, MwSt. je Satz und Brutto. Angebot per Klick in eine Rechnung umwandeln. Rechnungsvorschau.
+- **Termine:** Kalender nach Tagen, mit Kunde, Mitarbeiter, Uhrzeit und Notiz. Aus einem Termin direkt die Arbeitszeit buchen.
+- **Zeiten:** Stunden pro Tag erfassen (direkt oder aus Von/Bis mit Pause), Summe der Woche und offener abrechenbarer Stunden. Offene Zeiten je Kunde mit einem Klick in Rechnungen umwandeln.
+- **Mitarbeiter:** einfache Liste, die in Terminen und Zeiten zur Auswahl steht.
 - **Kunden & Katalog:** Kundenliste und ein Material-/Leistungskatalog; Katalog-Einträge füllen Positionen automatisch aus.
 - **Mehr:** Firmendaten (erscheinen auf der Rechnung), Backup-Export/Import.
 

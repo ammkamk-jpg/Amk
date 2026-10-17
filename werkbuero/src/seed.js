@@ -50,6 +50,21 @@
           ],
         },
       ],
+      team: [
+        { id: "m1", name: "Chef (du)" },
+        { id: "m2", name: "Lukas" },
+        { id: "m3", name: "Sara" },
+      ],
+      appointments: [
+        { id: "t1", date: "2026-10-17", start: "08:00", end: "10:00", customerId: "c1", workerId: "m2", title: "LED-Panels montieren", note: "Leiter mitnehmen" },
+        { id: "t2", date: "2026-10-17", start: "11:00", end: "12:30", customerId: "c3", workerId: "m3", title: "Zählerschrank prüfen", note: "" },
+        { id: "t3", date: "2026-10-20", start: "09:00", end: "16:00", customerId: "c3", workerId: "m2", title: "Leitungen verlegen", note: "Material: Kabeltrommel" },
+      ],
+      times: [
+        { id: "z1", date: "2026-10-16", customerId: "c3", workerId: "m2", minutes: 480, note: "Leitungen 1. OG", billable: true, invoiced: false },
+        { id: "z2", date: "2026-10-16", customerId: "c1", workerId: "m3", minutes: 120, note: "Angebot vor Ort", billable: false, invoiced: false },
+        { id: "z3", date: "2026-10-15", customerId: "c3", workerId: "m2", minutes: 300, note: "Vorbereitung", billable: true, invoiced: false },
+      ],
     };
   }
 
