@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FUT Trader</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <header>
+    <h1>FUT Trader</h1>
+    <nav>
+      <button class="tab active" data-tab="rechner">Rechner</button>
+      <button class="tab" data-tab="watchlist">Watchlist</button>
+      <button class="tab" data-tab="trades">Trades</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="rechner" class="panel active">
+      <div class="card">
+        <h2>Gewinn nach Steuer</h2>
+        <label>Kaufpreis <input id="calc-buy" type="number" inputmode="numeric" min="0" step="50" placeholder="z. B. 10000"></label>
+        <label>Verkaufspreis <input id="calc-sell" type="number" inputmode="numeric" min="0" step="50" placeholder="z. B. 12000"></label>
+        <dl id="calc-result" class="result"></dl>
+      </div>
+      <div class="card">
+        <h2>Zielpreise</h2>
+        <label>Gewünschter Mindestgewinn <input id="calc-margin" type="number" inputmode="numeric" min="0" step="50" value="0"></label>
+        <dl id="calc-targets" class="result"></dl>
+      </div>
+      <p class="hint">Gerechnet mit 5 % EA-Steuer und gültigen Preisstufen (50 / 100 / 250 / 500 / 1.000).</p>
+    </section>
+
+    <section id="watchlist" class="panel">
+      <form id="watch-form" class="card">
+        <h2>Spieler beobachten</h2>
+        <label>Name <input name="name" required placeholder="z. B. Mbappé"></label>
+        <label>Version <input name="version" placeholder="z. B. Gold Rare, TOTW"></label>
+        <div class="row">
+          <label>Ziel-Kauf <input name="targetBuy" type="number" inputmode="numeric" min="0" step="50" required></label>
+          <label>Ziel-Verkauf <input name="targetSell" type="number" inputmode="numeric" min="0" step="50" required></label>
+        </div>
+        <button type="submit">Hinzufügen</button>
+      </form>
+      <div id="watch-list"></div>
+    </section>
+
+    <section id="trades" class="panel">
+      <form id="trade-form" class="card">
+        <h2>Kauf eintragen</h2>
+        <label>Name <input name="name" required></label>
+        <label>Kaufpreis <input name="buy" type="number" inputmode="numeric" min="0" step="50" required></label>
+        <button type="submit">Eintragen</button>
+      </form>
+      <div id="trade-summary" class="card"></div>
+      <div id="trade-list"></div>
+      <div class="card">
+        <h2>Daten</h2>
+        <p class="hint">Alles wird nur in diesem Browser gespeichert. Exportiere regelmäßig ein Backup.</p>
+        <div class="row">
+          <button id="export-btn" type="button">Exportieren</button>
+          <label class="button">Importieren <input id="import-input" type="file" accept="application/json" hidden></label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="src/fut.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
