@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      2.1.0
-// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Tabbed one-screen UI, Live Filters, Stats Zone, teal price tags on cards, configurable speed + breaks, auto price from the live market. No third-party servers.
+// @version      2.2.0
+// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Tabbed UI, Live Filters, Stats, teal price tags, Normal-snipe auto price calibration, running lock screen, console logging. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
 // @match        *://www.ea.com/*fifa/ultimate-team/web-app/*
@@ -23,7 +23,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '2.1.0';
+  var VERSION = '2.2.0';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
@@ -33,7 +33,7 @@
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150
   };
-  var HARD_FLOOR_MS = 300, EA_TAX = 0.05;
+  var HARD_FLOOR_MS = 300, EA_TAX = 0.05, NS_FEW = 4;
   function load() { try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch (e) { return Object.assign({}, DEFAULTS); } }
   function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch (e) {} }
   var cfg = load();
@@ -71,6 +71,7 @@
   // ---------- state ----------
   var running = false, stopReason = '', blockMsg = '', phase = 'idle', startTs = 0, autoPriced = false, gotRange = false, startCoins = null;
   var tab = 'snipe';
+  var normalMode = false, calibrating = false, calPrice = 0, calTries = 0, lockHidden = false, curName = null;
   var stats = { searches: 0, buys: 0, sinceBreak: 0, spent: 0, est: 0, marketCheapest: null, marketMedian: null, eaMin: null, eaMax: null, curDefId: null };
   var OBS = {};
   var capturedCriteria = null, capturedFromUrl = null, capturedPlain = null, lastCardHTML = '';
@@ -115,6 +116,10 @@
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
   function priceOf(it) { return it && ((it._auction && it._auction.buyNowPrice) != null ? it._auction.buyNowPrice : (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : null))); }
   function defIdOf(it) { try { return (it.definitionId != null ? it.definitionId : (it._staticData && it._staticData.id) || (it.resourceId) || (it.id)) || null; } catch (e) { return null; } }
+  function expiresOf(it) { try { return (it._auction && (it._auction.expires != null ? it._auction.expires : it._auction.timeRemaining)); } catch (e) { return null; } }
+  function isFresh(it) { var e = expiresOf(it); return (e == null) ? true : (e >= 3240 && e <= 3600); } // ~54-60 min left on a 1h listing = a fresh drop
+  function nameOf(it) { try { return (it._staticData && it._staticData.name) || it.name || (it.getStaticData && it.getStaticData().name) || null; } catch (e) { return null; } }
+  function searchLabel() { if (curName) return curName; var id = (capturedPlain && (capturedPlain.maskedDefId || capturedPlain.defId)) || stats.curDefId; return id ? ('player #' + id) : 'player'; }
   function effectiveMax() { if (cfg.maxBuy > 0) return cfg.maxBuy; if (capturedCriteria && capturedCriteria.maxBuy > 0) return capturedCriteria.maxBuy; return 0; }
   function plannedSell() { var m = effectiveMax(); if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0 && m) return roundStep(m * (1 + cfg.markupPercent / 100)); return 0; }
   function sellPriceFor(buy) { if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0) return roundStep(buy * (1 + cfg.markupPercent / 100)); return 0; }
@@ -217,22 +222,44 @@
         for (var i = 0; i < r.items.length; i++) { var p = priceOf(r.items[i]); if (p && p > 0) cands.push({ it: r.items[i], p: p }); }
         cands.sort(function (a, b) { return a.p - b.p; });
         if (cands.length) {
+          curName = nameOf(cands[0].it) || curName;
           stats.marketCheapest = cands[0].p; stats.marketMedian = cands[Math.floor(cands.length / 2)].p;
           var did = defIdOf(cands[0].it); stats.curDefId = did; cachePrice(did, stats.marketMedian); // cache like their marketPrice map
           paintBadges();
         }
         if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0]).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
+        // Normal snipe: lower the price until only a few listings show, then snipe the fresh drops.
+        if (calibrating) {
+          calTries++;
+          if (calPrice === 0) {
+            if (cands.length) { calPrice = roundStep(cands[0].p); cfg.maxBuy = calPrice; log('normal: start price ' + calPrice); }
+            else log('normal: no listings yet — waiting');
+          } else {
+            var n = cands.length;
+            console.log('[FUT Snipe] ' + searchLabel() + ': ' + n + ' listings at ' + calPrice);
+            if (n === 0 && calTries < 50 && calPrice > 250) { calPrice = roundStep(calPrice + stepFor(calPrice)); cfg.maxBuy = calPrice; calibrating = false; phase = 'running'; log('normal: settled at ' + calPrice + ' — sniping fresh drops'); }
+            else if (n > NS_FEW && calPrice > 250 && calTries < 50) { calPrice = roundStep(calPrice - stepFor(calPrice)); cfg.maxBuy = calPrice; log('normal: too many (' + n + ') — lowering to ' + calPrice); }
+            else { calibrating = false; phase = 'running'; log('normal: calibrated at ' + calPrice + ' (' + n + ' listings) — sniping fresh drops'); console.log('[FUT Snipe] Calibrated at ' + calPrice); }
+          }
+          render();
+          var cw = Math.max(HARD_FLOOR_MS, cfg.searchMinMs + rand(0, cfg.searchJitterMs));
+          for (var cx = 0; cx < cw && running; cx += 250) await sleep(250);
+          continue;
+        }
         if (cfg.autoPrice && !autoPriced) { if (cands.length) deriveAuto(cands.map(function (c) { return c.p; })); else { log('no listings yet — searching…'); render(); } }
         var max = effectiveMax();
+        var boughtThisCycle = 0;
         if (max > 0) {
           for (var j = 0; j < cands.length && running; j++) {
             var price = cands[j].p; if (price > max) break;
+            if (normalMode && !isFresh(cands[j].it)) continue; // only fresh ~1h drops in Normal snipe
             var bal = coins(); if (bal != null && price > bal) { log('not enough coins for ' + price); continue; }
             var b = await doBuy(cands[j].it, price); if (!running) return;
             if (b.ok) {
-              stats.buys++; addDaily(1); lastBuy = 'ok ' + price;
+              stats.buys++; boughtThisCycle++; addDaily(1); lastBuy = 'ok ' + price;
               stats.spent += price; var e = sellPriceFor(price) > 0 ? Math.floor(sellPriceFor(price) * (1 - EA_TAX)) - price : 0; stats.est += e;
               life.bought++; life.spent += price; life.est += e; saveLife();
+              console.log('[FUT Snipe] ' + searchLabel() + ' sniped for ' + price);
               log('BOUGHT ' + price + '  (' + stats.buys + ' this run, est +' + e + ')'); await relist(cands[j].it, price);
             }
             else { lastBuy = (b.err && b.err.msg) || 'failed'; if ((b.err || {}).stop) return requestStop(b.err.msg); }
@@ -240,6 +267,7 @@
             if (stats.buys >= cfg.sessionBuyCap) break;
           }
         }
+        if (running && boughtThisCycle === 0) console.log('[FUT Snipe] searching ' + searchLabel() + ' — none found');
       }
       render();
       if (stats.sinceBreak >= cfg.breakEvery) { stats.sinceBreak = 0; var base = Math.max(5, cfg.breakSec) * 1000; var br = rand(Math.round(base * 0.8), Math.round(base * 1.2)); phase = 'break'; log('break ' + Math.round(br / 1000) + 's (after ' + cfg.breakEvery + ' searches)'); render(); for (var t = 0; t < br && running; t += 500) await sleep(500); phase = 'running'; render(); }
@@ -253,11 +281,25 @@
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     if (!haveSearch()) { blockMsg = 'Pick a player in the market (search once) or load a filter, then Start.'; render(); return; }
     if (!cfg.autoPrice && effectiveMax() <= 0) { blockMsg = 'Set a Snipe-under price, or turn Auto price on.'; render(); return; }
+    normalMode = false; calibrating = false; lockHidden = false;
     if (cfg.autoPrice) { autoPriced = false; cfg.maxBuy = 0; } else { autoPriced = effectiveMax() > 0; }
     gotRange = false; startCoins = coins();
     stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0; stats.spent = 0; stats.est = 0;
     running = true; phase = 'running'; stopReason = ''; startTs = Date.now();
     log(cfg.autoPrice && !autoPriced ? 'starting — auto price from live market…' : 'sniping under ' + effectiveMax() + (plannedSell() ? ', relist ' + plannedSell() : ''));
+    render(); snipeLoop().catch(function (e) { requestStop('loop error: ' + e); });
+  }
+  function startNormal() {
+    blockMsg = '';
+    if (running) return;
+    if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
+    if (!haveSearch()) { blockMsg = 'Pick a player in the market (search once) or load a filter, then Normal snipe.'; render(); return; }
+    normalMode = true; calibrating = true; calPrice = 0; calTries = 0; lockHidden = false;
+    cfg.maxBuy = 0; autoPriced = false; gotRange = false; startCoins = coins();
+    stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0; stats.spent = 0; stats.est = 0;
+    running = true; phase = 'calibrating'; stopReason = ''; startTs = Date.now();
+    log('normal snipe — finding the price where only a few listings show…');
+    console.log('[FUT Snipe] Normal snipe started — calibrating price');
     render(); snipeLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
   function stopAll() { if (running) requestStop('stopped by you'); }
@@ -315,7 +357,7 @@
   function diag() {
     try { var row = document.querySelector('li.listFUTItem, .listFUTItem'); if (row) lastCardHTML = row.outerHTML.slice(0, 1200); } catch (e) {}
     var s = svc(), I = s && s.Item;
-    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, autoPrice: cfg.autoPrice, autoPriced: autoPriced, speed: cfg.speed, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, pricesCached: Object.keys(priceCache).length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
+    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, autoPrice: cfg.autoPrice, autoPriced: autoPriced, speed: cfg.speed, normalMode: normalMode, calPrice: calPrice, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, pricesCached: Object.keys(priceCache).length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
     var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -333,6 +375,15 @@
 
   var CSS =
     '#fs-panel *,#fs-fab,#fs-fab *{box-sizing:border-box}#fs-body{overflow-x:hidden}' +
+    '#fs-lock{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(7,11,18,.975);color:#eaf0f6;font:14px/1.45 -apple-system,system-ui,sans-serif;text-align:center;padding:24px;touch-action:none;-webkit-user-select:none;user-select:none}' +
+    '#fs-lock.show{display:flex}' +
+    '#fs-lock .spin{width:56px;height:56px;border-radius:50%;border:4px solid #1b2838;border-top-color:#00CAF6;animation:fsspin 1s linear infinite}' +
+    '@keyframes fsspin{to{transform:rotate(360deg)}}' +
+    '#fs-lock .lbig{font-size:21px;font-weight:800}#fs-lock .lstat{font-size:14px;color:#00CAF6;font-weight:700;min-height:18px}' +
+    '#fs-lock .lrow{display:flex;gap:26px;margin-top:2px}#fs-lock .lrow div{font-size:11px;color:#8ea0b5;text-transform:uppercase;letter-spacing:.4px}#fs-lock .lrow b{display:block;font-size:22px;color:#fff;font-weight:800;margin-top:2px}' +
+    '#fs-lock .lsub{font-size:12px;color:#7f93a8;max-width:300px}' +
+    '#fs-lock .lbtns{display:flex;gap:10px;margin-top:8px}#fs-lock .lbtns button{border:0;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:800}' +
+    '#fs-lstop{background:#FF5D0B;color:#fff}#fs-lhide{background:#1b2838;color:#cdd8e4}' +
     '.fs-r.rcol{flex-direction:column;align-items:stretch;gap:8px}.fs-r.rcol .lab{justify-content:flex-start;width:100%}.fs-r.rcol .sv{margin-left:auto;color:#00CAF6;font-weight:800}' +
     '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:4px;background:#2a3a4c;outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#00CAF6;border:3px solid #0b1017;box-shadow:0 1px 4px rgba(0,0,0,.4)}' +
     '.fs-hint{font-size:11px;color:#8ea0b5;padding:0 12px 10px;margin-top:-4px}' +
@@ -410,6 +461,7 @@
         sliderRow('😴', 'Break length', 'breakSec', 15, 300, 5, 's') +
       '</div>' +
       '<button class="fs-btn fs-go" id="fs-go"></button>' +
+      '<button class="fs-btn" id="fs-normal" style="margin-top:9px;background:#13324a;color:#9fe6ff">⚡ Normal snipe<span class="sub">auto-finds the price where only a few fresh drops show</span></button>' +
       '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-diag">Copy diag</button></div>' +
       '<details class="fs-sec"><summary>Prices &amp; limits</summary><div class="fs-card" style="margin-top:8px"><div class="fs-cols">' +
         '<div class="c"><div class="l">EA min</div><div class="v" id="fs-emin">—</div></div>' +
@@ -471,6 +523,17 @@
     fab.onclick = function () { el.classList.add('open'); fab.style.display = 'none'; render(); };
     document.body.appendChild(fab);
 
+    var lock = document.createElement('div'); lock.id = 'fs-lock';
+    lock.innerHTML = '<div class="spin"></div><div class="lbig">⚡ FUT Snipe running</div>' +
+      '<div class="lstat" id="fs-l-act">Searching…</div>' +
+      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
+      '<div class="lsub">Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.</div>' +
+      '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
+    document.body.appendChild(lock);
+    lock.addEventListener('touchmove', function (ev) { ev.preventDefault(); }, { passive: false });
+    lock.querySelector('#fs-lstop').onclick = function () { stopAll(); };
+    lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
+
     // live label while dragging a slider
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
@@ -483,6 +546,7 @@
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
         case 'fs-go': if (running) stopAll(); else startFlow(); break;
+        case 'fs-normal': if (running) stopAll(); else startNormal(); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
@@ -497,6 +561,20 @@
     var $ = function (id) { return document.getElementById(id); };
     var fb = $('fs-fab'); if (fb) fb.className = running ? 'run' : '';
     var panel = $('fs-panel'); if (!panel) return;
+    // running lock overlay (blocks swiping the web app while the bot runs)
+    var lock = $('fs-lock');
+    if (lock) {
+      if (running && !lockHidden) {
+        lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
+        if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'calibrating' ? ('Finding price… ' + (calPrice || '')) : (phase === 'break' ? 'On a break…' : ('Searching ' + searchLabel()));
+        if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
+        if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
+        var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
+      } else {
+        lock.classList.remove('show');
+        if (fb && !panel.classList.contains('open')) fb.style.display = '';
+      }
+    }
     // tabs
     var tabs = panel.querySelectorAll('.fs-tab');
     for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
@@ -531,7 +609,7 @@
         : 'Start sniping<span class="sub">' + (cfg.autoPrice && !(m > 0) ? 'auto price · finds it from the live market' : (m ? 'under ' + fmt(m) + (pr != null ? ' · ' + signed(pr) + '/card' : '') : 'set a snipe-under price')) + '</span>';
     }
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'break' ? 'Taking a short break…' : running ? '● Running' : haveServices() ? (haveSearch() ? 'Ready' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'calibrating' ? 'Finding the right price…' : phase === 'break' ? 'Taking a short break…' : running ? '● Running' : haveServices() ? (haveSearch() ? 'Ready' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
       $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
     }
   }
