@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      1.0.0
-// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Auto price from the live market + EA price range, markup re-listing, profit tracking, paced like a human, stops (never bypasses) on captcha/soft-ban. No third-party servers.
+// @version      1.1.0
+// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Full-screen panel, auto price from the live market + EA price range, markup re-listing, profit tracking, paced like a human, stops (never bypasses) on captcha/soft-ban. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
 // @match        *://www.ea.com/*fifa/ultimate-team/web-app/*
@@ -18,15 +18,16 @@
  * market breaks EA's rules; accounts get banned / coin-wiped. Your account, your risk.
  * Paces itself and STOPS (never bypasses) on captcha / soft-ban. Nothing leaves your device.
  *
- * USE: pick a player in the FUT market (set filter, tap Search once) → open this panel →
- * tap "Start sniping". Auto price reads the live market itself; nothing to look up.
+ * USE: pick a player in the FUT market (set filter, tap Search once) → tap the floating
+ * ⚡ button to open the full-screen panel → tap "Start sniping". Auto price reads the live
+ * market itself; nothing to look up. Tap ✕ to close the panel back to the market.
  */
 
 (function () {
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
@@ -254,12 +255,16 @@
   function signed(n) { return n == null ? '—' : (n > 0 ? '+' + fmtk(n) : fmtk(n)); }
 
   var CSS =
-    '#fs-panel{position:fixed;top:12px;right:12px;z-index:2147483647;width:320px;max-width:94vw;font:13px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0f1620;border:1px solid #223041;border-radius:18px;box-shadow:0 14px 48px rgba(0,0,0,.6);overflow:hidden}' +
-    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
-    '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:15px}#fs-head .v{opacity:.5;font-size:10px;margin-left:5px}' +
-    '#fs-head .coins{font-size:12px;font-weight:700;color:#f3c969;background:#1b2838;border-radius:9px;padding:5px 9px}' +
-    '#fs-min{background:#1b2838;color:#9fb0c3;border:0;border-radius:9px;width:28px;height:28px;font-size:16px;margin-left:8px}' +
-    '#fs-body{padding:12px 13px;max-height:82vh;overflow:auto}' +
+    '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:30px;background:#00CAF6;color:#05222c;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer;font-family:-apple-system,system-ui,sans-serif}' +
+    '#fs-fab .dot{position:absolute;top:8px;right:8px;width:12px;height:12px;border-radius:6px;background:#19e67d;border:2px solid #05222c;display:none}' +
+    '#fs-fab.run .dot{display:block}' +
+    '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0b1017}' +
+    '#fs-panel.open{display:flex}' +
+    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
+    '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:18px}#fs-head .v{opacity:.5;font-size:11px;margin-left:6px}' +
+    '#fs-head .coins{font-size:14px;font-weight:700;color:#f3c969;background:#1b2838;border-radius:10px;padding:7px 12px}' +
+    '#fs-min{background:#1b2838;color:#cdd8e4;border:0;border-radius:10px;width:40px;height:40px;font-size:20px;margin-left:10px}' +
+    '#fs-body{flex:1;overflow:auto;padding:14px;padding-bottom:max(24px,env(safe-area-inset-bottom));width:100%;max-width:520px;margin:0 auto}' +
     '.fs-card{background:#121c28;border:1px solid #223041;border-radius:14px;overflow:hidden;margin-bottom:11px}' +
     '.fs-ch{font-size:9.5px;letter-spacing:.6px;color:#6f8498;text-transform:uppercase;padding:9px 12px 0}' +
     '.fs-cols{display:grid;grid-template-columns:1fr 1fr 1fr}' +
@@ -270,17 +275,17 @@
     '.fs-rows{background:#141f2c;border:1px solid #223041;border-radius:14px;margin-bottom:11px;overflow:hidden}' +
     '.fs-r{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1b2836}.fs-r:last-child{border-bottom:0}' +
     '.fs-r .lab{display:flex;align-items:center;gap:9px;color:#cdd8e4}.fs-r .ic{width:17px;text-align:center;opacity:.85}' +
-    '.fs-r input[type=number]{width:92px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:7px 8px;font-size:13px;text-align:right}' +
-    '.fs-sw{width:44px;height:26px;border-radius:14px;background:#2a3a4c;position:relative;transition:.15s}.fs-sw.on{background:#00CAF6}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}.fs-sw.on:after{left:21px}' +
-    '.fs-segw{display:flex;gap:4px}.fs-sg{background:#0c131b;color:#9fb0c3;border:1px solid #223041;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:600}.fs-sg.on{background:#00CAF6;color:#05222c;border-color:#00CAF6}' +
-    '.fs-btn{width:100%;border:0;border-radius:13px;padding:14px;font-size:15px;font-weight:800;letter-spacing:.2px}' +
+    '.fs-r input[type=number]{width:104px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:9px 10px;font-size:15px;text-align:right}' +
+    '.fs-sw{width:48px;height:28px;border-radius:15px;background:#2a3a4c;position:relative;transition:.15s}.fs-sw.on{background:#00CAF6}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.15s}.fs-sw.on:after{left:23px}' +
+    '.fs-segw{display:flex;gap:5px}.fs-sg{background:#0c131b;color:#9fb0c3;border:1px solid #223041;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600}.fs-sg.on{background:#00CAF6;color:#05222c;border-color:#00CAF6}' +
+    '.fs-btn{width:100%;border:0;border-radius:14px;padding:16px;font-size:16px;font-weight:800;letter-spacing:.2px;margin-top:2px}' +
     '.fs-go{background:#00CAF6;color:#05222c}.fs-stop{background:#FF5D0B;color:#fff}' +
-    '.fs-btn .sub{display:block;font-size:11px;font-weight:600;opacity:.8;margin-top:2px}' +
-    '.fs-mini{display:flex;gap:8px;margin-top:9px}.fs-mini button{flex:1;background:#1b2838;color:#9fb0c3;border:0;border-radius:10px;padding:9px;font-size:12px;font-weight:600}' +
-    '#fs-block{color:#ff9a6b;font-size:11.5px;margin:0 0 10px}' +
-    '#fs-status{font-size:12px;color:#8ea0b5;margin:10px 2px 0;text-align:center}' +
-    '#fs-log{margin:8px 0 0;max-height:104px;overflow:auto;white-space:pre-wrap;color:#7f93a8;font-size:11px;line-height:1.5}' +
-    '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:12px;padding:4px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}';
+    '.fs-btn .sub{display:block;font-size:12px;font-weight:600;opacity:.8;margin-top:3px}' +
+    '.fs-mini{display:flex;gap:8px;margin-top:9px}.fs-mini button{flex:1;background:#1b2838;color:#9fb0c3;border:0;border-radius:11px;padding:11px;font-size:13px;font-weight:600}' +
+    '#fs-block{color:#ff9a6b;font-size:12px;margin:0 0 10px}' +
+    '#fs-status{font-size:13px;color:#8ea0b5;margin:12px 2px 0;text-align:center}' +
+    '#fs-log{margin:8px 0 0;max-height:120px;overflow:auto;white-space:pre-wrap;color:#7f93a8;font-size:11.5px;line-height:1.5}' +
+    '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:13px;padding:6px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}';
 
   function row(ic, label, key) { return '<label class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><input data-k="' + key + '" type="number" value="' + cfg[key] + '"></label>'; }
   function swRow(ic, label, key) { return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div></div>'; }
@@ -290,7 +295,7 @@
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
-      '<div id="fs-head"><div><span class="t">⚡ FUT Snipe</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min">–</button></div></div>' +
+      '<div id="fs-head"><div><span class="t">⚡ FUT Snipe</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-body">' +
         '<div id="fs-block"></div>' +
         '<div class="fs-card"><div class="fs-ch">Price — EA range &amp; live market</div><div class="fs-cols">' +
@@ -325,6 +330,10 @@
         '<div id="fs-status"></div><pre id="fs-log"></pre>' +
       '</div>';
     document.body.appendChild(el);
+    // Floating launcher button — tap to open the full-screen panel, tap ✕ to close it.
+    var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '⚡<span class="dot"></span>';
+    fab.onclick = function () { el.classList.add('open'); fab.style.display = 'none'; render(); };
+    document.body.appendChild(fab);
     el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
     el.addEventListener('click', function (e) {
       var sw = e.target.getAttribute && e.target.getAttribute('data-sw');
@@ -336,12 +345,14 @@
     el.querySelector('#fs-go').onclick = function () { if (running) stopAll(); else startFlow(); };
     el.querySelector('#fs-reset').onclick = resetLife;
     el.querySelector('#fs-diag').onclick = diag;
-    el.querySelector('#fs-min').onclick = function () { var b = document.getElementById('fs-body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
+    el.querySelector('#fs-min').onclick = function () { el.classList.remove('open'); fab.style.display = ''; };
     render();
   }
 
   function render() {
-    var $ = function (id) { return document.getElementById(id); }; if (!$('fs-body')) return;
+    var $ = function (id) { return document.getElementById(id); };
+    var fb = $('fs-fab'); if (fb) fb.className = running ? 'run' : '';
+    if (!$('fs-body')) return;
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
     $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
     $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
