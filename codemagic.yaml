@@ -1,0 +1,40 @@
+# Alternative cloud build for the FUT Snipe iOS app — Codemagic (free tier, reliable Mac allocation).
+# Use this if GitHub Actions' macOS queue won't allocate a runner for your account.
+#
+# Setup: sign up at https://codemagic.io with your GitHub, add this repo, pick the
+# "ios-unsigned" workflow, and Start build. Download FUTSnipe-unsigned.ipa from the
+# build artifacts, then sideload it with Sideloadly on your PC (see fut-snipe-ios/README.md).
+workflows:
+  ios-unsigned:
+    name: FUT Snipe iOS (unsigned IPA)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+      - name: Generate Xcode project
+        script: cd fut-snipe-ios && xcodegen generate
+      - name: Build (unsigned)
+        script: |
+          cd fut-snipe-ios
+          xcodebuild \
+            -project FUTSnipe.xcodeproj \
+            -target FUTSnipe \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+      - name: Package .ipa
+        script: |
+          cd fut-snipe-ios
+          APP="build/Build/Products/Release-iphoneos/FUTSnipe.app"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r -q FUTSnipe-unsigned.ipa Payload
+    artifacts:
+      - fut-snipe-ios/FUTSnipe-unsigned.ipa
