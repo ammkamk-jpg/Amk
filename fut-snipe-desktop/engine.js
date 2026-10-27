@@ -94,7 +94,11 @@
     try { svc().Item.bid(item, price).observe(OBS, function (sender, resp) { clearTimeout(to); if (resp && resp.success) finish({ ok: true }); else finish({ ok: false, err: classify(resp) }); });
     } catch (e) { clearTimeout(to); finish({ ok: false, err: { msg: 'bid error: ' + e } }); }
   }); }
-  function listWon(item, buy) { try { var sp = sellPriceFor(buy); if (sp > 0 && svc().Item.list) { var start = Math.max(150, sp - stepFor(sp)); svc().Item.list(item, start, sp).observe(OBS, function () {}); } } catch (e) {} }
+  // Re-list a won card: it lands in UNASSIGNED, so move to TRANSFER, wait, then list with
+  // a duration (matches the extension: move -> wait -> list(item,start,buyNow,3600)).
+  function moveToTransfer(item) { return new Promise(function (res) { try { var P = window.ItemPile && window.ItemPile.TRANSFER; if (P == null || !svc().Item.move) return res(false); svc().Item.move(item, P).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
+  function listItem(item, start, buyNow, dur) { return new Promise(function (res) { try { if (!svc().Item.list) return res(false); svc().Item.list(item, start, buyNow, dur).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
+  async function relist(item, buy) { var sp = sellPriceFor(buy); if (!(sp > 0)) return; await sleep(rand(500, 900)); var moved = await moveToTransfer(item); await sleep(rand(600, 925)); var start = Math.max(150, sp - stepFor(sp)); var ok = await listItem(item, start, sp, 3600); log(ok ? ('listed for ' + sp) : ('relist failed' + (moved ? '' : ' (move failed)'))); }
 
   (function hookXHR() {
     var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
@@ -145,7 +149,7 @@
         for (var j = 0; j < cands.length && running; j++) { var price = cands[j].p; if (price > max) break;
           var bal = coins(); if (bal != null && price > bal) { log('low coins for ' + price); continue; }
           var b = await doBuy(cands[j].it, price); if (!running) return;
-          if (b.ok) { stats.buys++; addDaily(1); lastBuy = 'ok ' + price; log('BOUGHT ' + price + '  (' + stats.buys + ' this run)'); listWon(cands[j].it, price); }
+          if (b.ok) { stats.buys++; addDaily(1); lastBuy = 'ok ' + price; log('BOUGHT ' + price + '  (' + stats.buys + ' this run)'); await relist(cands[j].it, price); }
           else { lastBuy = (b.err && b.err.msg) || 'failed'; if ((b.err || {}).stop) return requestStop(b.err.msg); }
           await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
           if (stats.buys >= cfg.sessionBuyCap) break;
