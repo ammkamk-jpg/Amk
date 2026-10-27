@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      0.4.0
+// @version      0.4.1
 // @description  Self-run transfer-market sniper for the EA SPORTS FC Ultimate Team Web App, paced like a human. Replays your own search (captured two ways). Stops (never bypasses) on captcha / soft-ban. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -30,6 +30,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
+  var VERSION = '0.4.1';
 
   var LS_KEY = 'futSnipe.settings.v2';
   var DEFAULTS = {
@@ -234,7 +235,7 @@
   function diag() {
     var s = svc(), I = s && s.Item;
     var d = {
-      version: '0.4.0',
+      version: VERSION,
       servicesFound: !!s,
       itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [],
       criteriaCtor: !!ctor(),
@@ -279,7 +280,7 @@
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
-      '<div id="fs-head"><div><b>⚽ FUT Snipe</b> <span class="dot" id="fs-dot">idle</span></div><button id="fs-min">–</button></div>' +
+      '<div id="fs-head"><div><b>⚽ FUT Snipe</b> <span style="opacity:.55;font-size:10.5px">v' + VERSION + '</span> <span class="dot" id="fs-dot">idle</span></div><button id="fs-min">–</button></div>' +
       '<div id="fs-body">' +
         '<div id="fs-status"></div><div id="fs-block"></div>' +
         '<p class="fs-hint">1) In the market screen set filters + Max Buy Now and tap <b>Search</b>. 2) Return here, tap <b>Test search</b>, then <b>Start</b>.</p>' +
