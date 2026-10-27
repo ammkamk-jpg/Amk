@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      0.4.1
+// @version      0.5.0
 // @description  Self-run transfer-market sniper for the EA SPORTS FC Ultimate Team Web App, paced like a human. Replays your own search (captured two ways). Stops (never bypasses) on captcha / soft-ban. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -30,7 +30,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '0.4.1';
+  var VERSION = '0.5.0';
 
   var LS_KEY = 'futSnipe.settings.v2';
   var DEFAULTS = {
@@ -51,7 +51,7 @@
   var OBS = {};
   var capturedCriteria = null;    // real criteria object from the service call
   var capturedFromUrl = null;     // criteria rebuilt from the market request URL
-  var lastMethod = '', sampleKeys = [], samplePrice = null, tmUrls = [];
+  var lastMethod = '', sampleKeys = [], samplePrice = null, tmUrls = [], lastBuy = '';
   var rand = function (a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
 
@@ -106,7 +106,12 @@
     return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl); }
-  function priceOf(it) { return it && (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : (it._auction && it._auction.buyNowPrice))); }
+  // Search results are player Item objects carrying an _auction (as in fc27). Buy-now
+  // price lives at item._auction.buyNowPrice (older shapes used item.buyNowPrice).
+  function priceOf(it) { return it && ((it._auction && it._auction.buyNowPrice) != null ? it._auction.buyNowPrice : (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : null))); }
+  // The price ceiling to snipe under: the panel's Max Buy Now, else the maxBuy you set
+  // in your FUT search filter (captured). Buying with no ceiling is unsafe, so we block it.
+  function effectiveMax() { if (cfg.maxBuy > 0) return cfg.maxBuy; if (capturedCriteria && capturedCriteria.maxBuy > 0) return capturedCriteria.maxBuy; return 0; }
 
   function classify(resp, http) {
     var code = (resp && (resp.status || resp.error || (resp.data && resp.data.code))) || http || 0;
@@ -199,21 +204,23 @@
       stats.searches++; stats.sinceBreak++; stats.lastItems = r.ok ? r.items.length : 0;
       if (!r.ok) { if ((r.err || {}).stop) return requestStop(r.err.msg); log('search: ' + ((r.err || {}).msg || '—')); }
       else {
-        var cheapest = null, priced = 0;
-        for (var i = 0; i < r.items.length && running; i++) {
-          var it = r.items[i], price = priceOf(it);
-          if (!price || price <= 0) continue; priced++;
-          if (cheapest == null || price < cheapest) cheapest = price;
-          if (cfg.maxBuy > 0 && price > cfg.maxBuy) continue;
-          var bal = coins(); if (bal != null && price > bal) { log('skip: low coins'); continue; }
-          var b = await doBuy(it, price); if (!running) return;
-          if (b.ok) { stats.buys++; addDaily(1); log('BOUGHT ' + price + '  (session ' + stats.buys + ', today ' + dailyCount() + ')'); listWon(it); }
-          else if ((b.err || {}).stop) return requestStop(b.err.msg);
+        var max = effectiveMax();
+        // candidates: real buy-now listings only, cheapest first (like the extension).
+        var cands = [];
+        for (var i = 0; i < r.items.length; i++) { var p = priceOf(r.items[i]); if (p && p > 0) cands.push({ it: r.items[i], p: p }); }
+        cands.sort(function (a, b) { return a.p - b.p; });
+        stats.lastCheapest = cands.length ? cands[0].p : null;
+        if (r.items.length && !cands.length) log('search ok but 0 items had a readable price — tap Copy diag');
+        for (var j = 0; j < cands.length && running; j++) {
+          var price = cands[j].p;
+          if (price > max) break;                       // sorted asc: nothing cheaper remains over the cap
+          var bal = coins(); if (bal != null && price > bal) { log('skip: not enough coins for ' + price); continue; }
+          var b = await doBuy(cands[j].it, price); if (!running) return;
+          if (b.ok) { stats.buys++; addDaily(1); lastBuy = 'ok ' + price; log('BOUGHT ' + price + '  (session ' + stats.buys + ', today ' + dailyCount() + ')'); listWon(cands[j].it); }
+          else { lastBuy = (b.err && b.err.msg) || 'failed'; if ((b.err || {}).stop) return requestStop(b.err.msg); log('buy ' + price + ': ' + lastBuy); }
           await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
           if (stats.buys >= cfg.sessionBuyCap) break;
         }
-        stats.lastCheapest = cheapest;
-        if (r.items.length && priced === 0) log('search ok but 0 items had a readable price — tap Copy diag');
       }
       render();
       if (stats.sinceBreak >= cfg.breakEvery) { stats.sinceBreak = 0; var br = rand(cfg.breakMinMs, cfg.breakMaxMs); log('break ' + Math.round(br / 1000) + 's'); for (var t = 0; t < br && running; t += 500) await sleep(500); }
@@ -226,6 +233,7 @@
     if (running) return;
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; log(blockMsg); render(); return; }
     if (!haveSearch()) { blockMsg = 'Do a search in the market screen first, then Start.'; log(blockMsg); render(); return; }
+    if (effectiveMax() <= 0) { blockMsg = 'Set a Max Buy Now (panel or your FUT search filter) so it only buys under that price.'; log(blockMsg); render(); return; }
     running = true; stopReason = ''; stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0;
     log('started. coins: ' + (coins() != null ? coins() : '?'));
     render(); loop().catch(function (e) { requestStop('loop error: ' + e); });
@@ -242,7 +250,7 @@
       userReadable: coins() != null,
       capturedCriteria: !!capturedCriteria, capturedCriteriaKeys: capturedCriteria ? Object.keys(capturedCriteria) : [],
       capturedFromUrl: !!capturedFromUrl, capturedFromUrlKeys: capturedFromUrl ? Object.keys(capturedFromUrl) : [],
-      lastSearchMethod: lastMethod, lastItemCount: stats.lastItems, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice,
+      effectiveMax: effectiveMax(), lastBuy: lastBuy, lastSearchMethod: lastMethod, lastItemCount: stats.lastItems, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice,
       recentMarketUrls: tmUrls
     };
     var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
