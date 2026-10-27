@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FUT Snipe Desktop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="side">
+      <div class="brand"><span class="logo">⚡</span><div><div class="name">FUT Snipe</div><div class="tag">desktop</div></div></div>
+
+      <div class="tiles">
+        <div class="tile"><div class="l">Coins</div><div class="v" id="t-coins">—</div></div>
+        <div class="tile"><div class="l">Search</div><div class="v" id="t-search">—</div></div>
+        <div class="tile"><div class="l">Bought</div><div class="v" id="t-buys">0</div></div>
+      </div>
+
+      <div class="plan">
+        <div class="c"><div class="l">Snipe under</div><div class="v cyan" id="p-max">—</div></div>
+        <div class="c"><div class="l">Sell at</div><div class="v" id="p-sell">—</div></div>
+        <div class="c"><div class="l">Profit</div><div class="v green" id="p-prof">—</div></div>
+      </div>
+
+      <div class="rows">
+        <div class="r"><span>✨ Auto price</span><div class="sw" id="sw-auto"></div></div>
+        <label class="r"><span>◎ Snipe under</span><input id="in-maxBuy" type="number" value="0"></label>
+        <label class="r"><span>🏷️ Sell at (0=auto)</span><input id="in-sellAt" type="number" value="0"></label>
+        <label class="r"><span>📈 Markup % (if Sell=0)</span><input id="in-markupPercent" type="number" value="0"></label>
+        <label class="r"><span>🛑 Session buy cap</span><input id="in-sessionBuyCap" type="number" value="15"></label>
+        <label class="r"><span>⏱️ Run minutes (0=∞)</span><input id="in-runMinutes" type="number" value="0"></label>
+        <label class="r"><span>🎯 Auto margin</span><input id="in-margin" type="number" value="250"></label>
+      </div>
+
+      <button id="go" class="btn go">Check price &amp; Start</button>
+      <div class="mini"><button id="suggest">Suggest prices</button></div>
+
+      <div id="status" class="status">Loading…</div>
+      <div id="phone" class="phone"></div>
+      <pre id="log" class="log"></pre>
+    </aside>
+
+    <main id="stage">
+      <div id="bar">Embedded FUT Web App — sign in here; the sniper loads automatically.</div>
+      <webview id="fut" src="https://www.ea.com/ea-sports-fc/ultimate-team/web-app/"
+               partition="persist:fut" allowpopups></webview>
+    </main>
+  </div>
+  <script src="dashboard.js"></script>
+</body>
+</html>
