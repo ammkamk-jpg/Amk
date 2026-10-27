@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      0.6.0
-// @description  Self-run transfer-market sniper for the EA SPORTS FC Ultimate Team Web App. Replays your own search, price-checks, snipes under your price and (optionally) re-lists. Paces like a human; stops (never bypasses) on captcha/soft-ban. No third-party servers.
+// @version      0.7.0
+// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Local price check -> suggested snipe/sell, markup re-listing, paced like a human, stops (never bypasses) on captcha/soft-ban. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
 // @match        *://www.ea.com/*fifa/ultimate-team/web-app/*
@@ -13,28 +13,32 @@
 // ==/UserScript==
 
 /*
- * Not affiliated with EA or FUT Simple Trader. Styled similarly, but it is its own tool
- * and uses no third-party server. Automating the FUT market breaks EA's rules; accounts
- * get banned / coin-wiped. Your account, your risk. It paces itself and STOPS (never
- * bypasses) on captcha / soft-ban. Nothing leaves your device.
+ * Not affiliated with EA or FUT Simple Trader. Its own tool, no third-party server; all
+ * pricing is computed locally from live market samples (no price database). Automating
+ * the FUT market breaks EA's rules; accounts get banned / coin-wiped. Your account, your
+ * risk. Paces itself and STOPS (never bypasses) on captcha / soft-ban. Nothing leaves
+ * your device.
  *
- * USE: In the FUT market screen set filters + Max Buy Now and tap SEARCH once (so it
- * captures a real search). Then open this panel, set your Snipe-under price, and tap
- * "Check price & Start".
+ * USE: In the FUT market screen set your filter and tap SEARCH once (captures a real
+ * search). Then open this panel. Leave "Auto price" on to let it pick snipe/sell from a
+ * live price check, or set them yourself. Tap "Check price & Start".
  */
 
 (function () {
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '0.6.0';
+  var VERSION = '0.7.0';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3';
   var DEFAULTS = {
-    maxBuy: 0,        // snipe under this price (0 = use the Max Buy Now from your FUT filter)
-    sellAt: 0,        // re-list won cards at this price (0 = keep them, no relist)
-    runMinutes: 0,    // auto-stop after N minutes (0 = no time limit)
+    autoPrice: 1,     // 1 = pick snipe/sell from a live price check; 0 = use the values below
+    margin: 250,      // auto-price: snipe this far under the live cheapest BIN
+    maxBuy: 0,        // snipe under this price (manual, or filled by auto-price)
+    sellAt: 0,        // fixed re-list price (0 = use markup%, or keep if markup% also 0)
+    markupPercent: 0, // re-list at buy x (1 + markup%); used when Sell at = 0
+    runMinutes: 0,    // auto-stop after N minutes (0 = no limit)
     searchMinMs: 4000, searchJitterMs: 3000, buyGapMinMs: 700, buyGapMaxMs: 1600,
     breakEvery: 25, breakMinMs: 60000, breakMaxMs: 180000,
     sessionBuyCap: 15, dailyBuyCap: 150
@@ -48,16 +52,20 @@
   function dailyCount() { try { var d = JSON.parse(localStorage.getItem('futSnipe.daily') || '{}'); return d.date === today() ? (d.n | 0) : 0; } catch (e) { return 0; } }
   function addDaily(n) { try { localStorage.setItem('futSnipe.daily', JSON.stringify({ date: today(), n: dailyCount() + n })); } catch (e) {} }
 
+  // FUT price increments — round a price to a valid step (never below 150).
+  function stepFor(p) { return p < 1000 ? 50 : p < 10000 ? 100 : p < 50000 ? 250 : p < 100000 ? 500 : 1000; }
+  function roundStep(p) { var s = stepFor(p); return Math.max(150, Math.round(p / s) * s); }
+
   // ---------- state ----------
   var running = false, stopReason = '', blockMsg = '', phase = 'idle', startTs = 0;
-  var stats = { searches: 0, buys: 0, sinceBreak: 0, lastItems: 0, lastCheapest: null, marketPrice: null };
+  var stats = { searches: 0, buys: 0, sinceBreak: 0, lastItems: 0, lastCheapest: null, marketCheapest: null, marketMedian: null };
   var OBS = {};
   var capturedCriteria = null, capturedFromUrl = null;
   var lastMethod = '', sampleKeys = [], samplePrice = null, tmUrls = [], lastBuy = '';
   var rand = function (a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
 
-  // ---------- EA services (unchanged engine) ----------
+  // ---------- EA services ----------
   function svc() { return window.services || (window.App && window.App.services) || null; }
   function haveServices() { var s = svc(); return !!(s && s.Item && s.Item.searchTransferMarket && s.Item.bid && s.User && s.User.getUser); }
   function coins() { try { return svc().User.getUser().coins.amount; } catch (e) { return null; } }
@@ -92,7 +100,10 @@
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl); }
   function priceOf(it) { return it && ((it._auction && it._auction.buyNowPrice) != null ? it._auction.buyNowPrice : (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : null))); }
   function effectiveMax() { if (cfg.maxBuy > 0) return cfg.maxBuy; if (capturedCriteria && capturedCriteria.maxBuy > 0) return capturedCriteria.maxBuy; return 0; }
-  function estProfit() { var m = effectiveMax(); if (!cfg.sellAt || !m) return null; return Math.floor(cfg.sellAt * (1 - EA_TAX)) - m; }
+  // planned re-list price: fixed Sell at, else markup over the snipe price, else none
+  function plannedSell() { var m = effectiveMax(); if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0 && m) return roundStep(m * (1 + cfg.markupPercent / 100)); return 0; }
+  function sellPriceFor(buy) { if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0) return roundStep(buy * (1 + cfg.markupPercent / 100)); return 0; }
+  function estProfit() { var m = effectiveMax(), s = plannedSell(); if (!s || !m) return null; return Math.floor(s * (1 - EA_TAX)) - m; }
 
   function classify(resp, http) {
     var code = (resp && (resp.status || resp.error || (resp.data && resp.data.code))) || http || 0;
@@ -126,7 +137,7 @@
       } catch (e) { clearTimeout(to); finish({ ok: false, err: { msg: 'bid error: ' + e } }); }
     });
   }
-  function listWon(item) { try { if (cfg.sellAt > 0 && svc().Item.list) { var start = Math.max(150, cfg.sellAt - Math.max(50, Math.round(cfg.sellAt * 0.02))); svc().Item.list(item, start, cfg.sellAt).observe(OBS, function () {}); } } catch (e) {} }
+  function listWon(item, buy) { try { var sp = sellPriceFor(buy); if (sp > 0 && svc().Item.list) { var start = Math.max(150, sp - stepFor(sp)); svc().Item.list(item, start, sp).observe(OBS, function () {}); } } catch (e) {} }
 
   (function hookXHR() {
     var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
@@ -145,17 +156,33 @@
 
   function requestStop(reason) { running = false; phase = 'idle'; stopReason = reason; log('STOP: ' + reason); render(); }
 
-  // price check: a few searches to find the current cheapest buy-now, no buying
+  // Local price check: a few searches, collect all BINs, return cheapest + median.
   async function priceCheck(rounds) {
-    var best = null;
-    for (var k = 0; k < (rounds || 3) && phase === 'checking'; k++) {
+    var all = [];
+    for (var k = 0; k < (rounds || 3) && (phase === 'checking'); k++) {
       var r = await doSearch();
-      if (r.ok) r.items.forEach(function (it) { var p = priceOf(it); if (p && (best == null || p < best)) best = p; });
+      if (r.ok) r.items.forEach(function (it) { var p = priceOf(it); if (p && p > 0) all.push(p); });
       else if ((r.err || {}).stop) { requestStop(r.err.msg); return null; }
       await sleep(Math.max(HARD_FLOOR_MS, rand(1500, 2600)));
     }
-    if (best != null) { stats.marketPrice = best; log('market ~ ' + best); }
-    return best;
+    if (!all.length) return null;
+    all.sort(function (a, b) { return a - b; });
+    var cheapest = all[0], median = all[Math.floor(all.length / 2)];
+    stats.marketCheapest = cheapest; stats.marketMedian = median;
+    log('price check: ' + all.length + ' BINs, cheapest ' + cheapest + ', median ' + median);
+    return { cheapest: cheapest, median: median, n: all.length };
+  }
+
+  // Turn a price check into snipe-under + sell-at (the local "Live Filters" math).
+  function applySuggestion(pc) {
+    if (!pc) return false;
+    var under = roundStep(Math.max(150, pc.cheapest - cfg.margin));
+    if (under >= pc.cheapest) under = roundStep(pc.cheapest - stepFor(pc.cheapest));
+    cfg.maxBuy = under;
+    cfg.sellAt = cfg.markupPercent > 0 ? roundStep(under * (1 + cfg.markupPercent / 100)) : roundStep(pc.median);
+    save(); render();
+    log('suggested: snipe under ' + cfg.maxBuy + ', sell ' + cfg.sellAt + (estProfit() != null ? ', profit ' + estProfit() : ''));
+    return true;
   }
 
   async function snipeLoop() {
@@ -176,7 +203,7 @@
           var price = cands[j].p; if (price > max) break;
           var bal = coins(); if (bal != null && price > bal) { log('not enough coins for ' + price); continue; }
           var b = await doBuy(cands[j].it, price); if (!running) return;
-          if (b.ok) { stats.buys++; addDaily(1); lastBuy = 'ok ' + price; log('BOUGHT ' + price + '  (' + stats.buys + ' this run)'); listWon(cands[j].it); }
+          if (b.ok) { stats.buys++; addDaily(1); lastBuy = 'ok ' + price; log('BOUGHT ' + price + '  (' + stats.buys + ' this run)'); listWon(cands[j].it, price); }
           else { lastBuy = (b.err && b.err.msg) || 'failed'; if ((b.err || {}).stop) return requestStop(b.err.msg); }
           await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
           if (stats.buys >= cfg.sessionBuyCap) break;
@@ -188,31 +215,46 @@
     }
   }
 
+  async function doPriceCheckOnly() {
+    blockMsg = '';
+    if (!haveServices()) { blockMsg = 'Open & sign into the FUT Web App.'; render(); return; }
+    if (!haveSearch()) { blockMsg = 'Search once in the market screen first.'; render(); return; }
+    if (phase === 'checking' || running) return;
+    phase = 'checking'; render(); log('checking market price…');
+    var pc = await priceCheck(3);
+    phase = 'idle';
+    if (pc && cfg.autoPrice) applySuggestion(pc);
+    else if (!pc) log('no prices found — try a broader search');
+    render();
+  }
+
   async function startFlow() {
     blockMsg = '';
     if (running || phase === 'checking') return;
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     if (!haveSearch()) { blockMsg = 'Do a search in the market screen first (so it captures it).'; render(); return; }
-    if (effectiveMax() <= 0) { blockMsg = 'Set a Snipe-under price (or Max Buy Now in your FUT filter).'; render(); return; }
+    if (!cfg.autoPrice && effectiveMax() <= 0) { blockMsg = 'Set a Snipe-under price, or turn Auto price on.'; render(); return; }
     phase = 'checking'; stopReason = ''; render(); log('checking market price…');
-    await priceCheck(3);
-    if (phase !== 'checking') return; // stopped/cancelled during check
+    var pc = await priceCheck(3);
+    if (phase !== 'checking') return; // cancelled/stopped during check
+    if (cfg.autoPrice) { if (!applySuggestion(pc)) { requestStop('price check found nothing — set Snipe-under manually'); return; } }
+    if (effectiveMax() <= 0) { requestStop('no snipe price — set one and retry'); return; }
     running = true; phase = 'running'; startTs = Date.now(); stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0;
-    log('sniping under ' + effectiveMax() + (cfg.sellAt ? ', relist ' + cfg.sellAt : ''));
+    log('sniping under ' + effectiveMax() + (plannedSell() ? ', relist ' + plannedSell() : ''));
     render(); snipeLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
   function stopAll() { if (running || phase === 'checking') requestStop('stopped by you'); }
 
   function diag() {
     var s = svc(), I = s && s.Item;
-    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedFromUrl: !!capturedFromUrl, effectiveMax: effectiveMax(), sellAt: cfg.sellAt, estProfit: estProfit(), marketPrice: stats.marketPrice, lastBuy: lastBuy, lastSearchMethod: lastMethod, lastItemCount: stats.lastItems, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, recentMarketUrls: tmUrls };
+    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedFromUrl: !!capturedFromUrl, autoPrice: cfg.autoPrice, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, lastBuy: lastBuy, lastItemCount: stats.lastItems, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, recentMarketUrls: tmUrls };
     var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
     render();
   }
 
-  // ---------- UI (dark + cyan, styled after the market overlays) ----------
+  // ---------- UI ----------
   var logLines = [];
   function log(m) { logLines.unshift(new Date().toLocaleTimeString() + '  ' + m); logLines = logLines.slice(0, 30); var b = document.getElementById('fs-log'); if (b) b.textContent = logLines.join('\n'); try { console.debug('[FUT Snipe]', m); } catch (e) {} }
   function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
@@ -222,7 +264,7 @@
     '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
     '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:15px}#fs-head .v{opacity:.5;font-size:10px;margin-left:5px}' +
     '#fs-min{background:#1b2838;color:#9fb0c3;border:0;border-radius:9px;width:30px;height:30px;font-size:17px}' +
-    '#fs-body{padding:13px 14px;max-height:78vh;overflow:auto}' +
+    '#fs-body{padding:13px 14px;max-height:80vh;overflow:auto}' +
     '.fs-tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}' +
     '.fs-tile{background:#172231;border:1px solid #223041;border-radius:12px;padding:9px 8px;text-align:center}' +
     '.fs-tile .l{font-size:9.5px;letter-spacing:.6px;color:#7f93a8;text-transform:uppercase}.fs-tile .v{font-size:15px;font-weight:800;margin-top:2px}' +
@@ -233,7 +275,8 @@
     '.fs-rows{background:#141f2c;border:1px solid #223041;border-radius:14px;margin-bottom:12px;overflow:hidden}' +
     '.fs-r{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border-bottom:1px solid #1b2836}.fs-r:last-child{border-bottom:0}' +
     '.fs-r .lab{display:flex;align-items:center;gap:9px;color:#cdd8e4}.fs-r .ic{width:17px;text-align:center;opacity:.85}' +
-    '.fs-r input{width:96px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:7px 8px;font-size:13px;text-align:right}' +
+    '.fs-r input[type=number]{width:96px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:7px 8px;font-size:13px;text-align:right}' +
+    '.fs-sw{width:44px;height:26px;border-radius:14px;background:#2a3a4c;position:relative;transition:.15s}.fs-sw.on{background:#00CAF6}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}.fs-sw.on:after{left:21px}' +
     '.fs-btn{width:100%;border:0;border-radius:13px;padding:14px;font-size:15px;font-weight:800;letter-spacing:.2px}' +
     '.fs-go{background:#00CAF6;color:#05222c}.fs-stop{background:#FF5D0B;color:#fff}' +
     '.fs-btn .sub{display:block;font-size:11px;font-weight:600;opacity:.8;margin-top:2px}' +
@@ -244,6 +287,7 @@
     '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:12px;padding:4px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}';
 
   function row(ic, label, key) { return '<label class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><input data-k="' + key + '" type="number" value="' + cfg[key] + '"></label>'; }
+  function swRow(ic, label, key) { return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div></div>'; }
 
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
@@ -263,14 +307,16 @@
           '<div class="c"><div class="l">Profit</div><div class="v g" id="fs-p-prof">—</div></div>' +
         '</div>' +
         '<div class="fs-rows">' +
+          swRow('✨', 'Auto price', 'autoPrice') +
           row('◎', 'Snipe under', 'maxBuy') +
-          row('🏷️', 'Sell at (0 = keep)', 'sellAt') +
-          row('⏱️', 'Run minutes (0 = ∞)', 'runMinutes') +
+          row('🏷️', 'Sell at (0 = auto)', 'sellAt') +
+          row('📈', 'Markup % (if Sell=0)', 'markupPercent') +
           row('🛑', 'Session buy cap', 'sessionBuyCap') +
         '</div>' +
         '<button class="fs-btn fs-go" id="fs-go"></button>' +
-        '<div class="fs-mini"><button id="fs-test">Test search</button><button id="fs-diag">Copy diag</button></div>' +
+        '<div class="fs-mini"><button id="fs-suggest">Suggest prices</button><button id="fs-diag">Copy diag</button></div>' +
         '<details class="fs-sec"><summary>Advanced</summary><div class="fs-rows" style="margin-top:8px">' +
+          row('🎯', 'Auto margin (under cheapest)', 'margin') + row('⏱️', 'Run minutes (0 = ∞)', 'runMinutes') +
           row('⚡', 'Search gap min (ms)', 'searchMinMs') + row('🎲', 'Search gap jitter (ms)', 'searchJitterMs') +
           row('☕', 'Break every N', 'breakEvery') + row('📅', 'Daily buy cap', 'dailyBuyCap') +
         '</div></details>' +
@@ -278,8 +324,9 @@
       '</div>';
     document.body.appendChild(el);
     el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
+    el.addEventListener('click', function (e) { var sw = e.target.getAttribute && e.target.getAttribute('data-sw'); if (!sw) return; cfg[sw] = cfg[sw] ? 0 : 1; e.target.className = 'fs-sw' + (cfg[sw] ? ' on' : ''); save(); render(); });
     el.querySelector('#fs-go').onclick = function () { if (running || phase === 'checking') stopAll(); else startFlow(); };
-    el.querySelector('#fs-test').onclick = async function () { if (!haveServices()) { blockMsg = 'Open & sign into the FUT Web App.'; render(); return; } if (!haveSearch()) { blockMsg = 'Search once in the market screen first.'; render(); return; } log('test search…'); var r = await doSearch(); if (r.ok) { var c = null; r.items.forEach(function (it) { var p = priceOf(it); if (p && (c == null || p < c)) c = p; }); stats.lastItems = r.items.length; stats.lastCheapest = c; log('found ' + r.items.length + ' items' + (c != null ? ', cheapest ' + c : ', no readable price — Copy diag')); } else log('no results: ' + (r.err && r.err.msg)); render(); };
+    el.querySelector('#fs-suggest').onclick = doPriceCheckOnly;
     el.querySelector('#fs-diag').onclick = diag;
     el.querySelector('#fs-min').onclick = function () { var b = document.getElementById('fs-body'); b.style.display = b.style.display === 'none' ? '' : 'none'; };
     render();
@@ -288,19 +335,18 @@
   function render() {
     var $ = function (id) { return document.getElementById(id); }; if (!$('fs-body')) return;
     $('fs-coins').textContent = coins() != null ? (coins() >= 1e6 ? (coins() / 1e6).toFixed(2) + 'M' : fmt(coins())) : '—';
-    $('fs-cap2').textContent = haveSearch() ? '✓' : '—';
-    $('fs-cap2').style.color = haveSearch() ? '#19e67d' : '#e7c37a';
+    $('fs-cap2').textContent = haveSearch() ? '✓' : '—'; $('fs-cap2').style.color = haveSearch() ? '#19e67d' : '#e7c37a';
     $('fs-buys').textContent = stats.buys;
-    var m = effectiveMax();
+    var m = effectiveMax(), s = plannedSell(), pr = estProfit();
     $('fs-p-max').textContent = m ? fmt(m) : '—';
-    $('fs-p-sell').textContent = cfg.sellAt ? fmt(cfg.sellAt) : '—';
-    var pr = estProfit(); $('fs-p-prof').textContent = pr == null ? '—' : (pr > 0 ? '+' + fmt(pr) : fmt(pr));
+    $('fs-p-sell').textContent = s ? fmt(s) : '—';
+    $('fs-p-prof').textContent = pr == null ? '—' : (pr > 0 ? '+' + fmt(pr) : fmt(pr));
     $('fs-block').textContent = blockMsg || '';
     var go = $('fs-go'), busy = running || phase === 'checking';
     go.className = 'fs-btn ' + (busy ? 'fs-stop' : 'fs-go');
     go.innerHTML = busy
       ? (phase === 'checking' ? 'Stop price check' : 'Stop sniping') + '<span class="sub">' + (phase === 'checking' ? 'checking market prices…' : 'bought ' + stats.buys + ' · ' + stats.searches + ' searches') + '</span>'
-      : 'Check price &amp; Start' + '<span class="sub">' + (m ? 'snipes under ' + fmt(m) + (estProfit() != null ? ' · profit ' + (estProfit() > 0 ? '+' : '') + fmt(estProfit()) : '') : 'set a snipe-under price') + '</span>';
+      : 'Check price &amp; Start<span class="sub">' + (cfg.autoPrice ? 'auto price · ' : '') + (m ? 'under ' + fmt(m) + (pr != null ? ' · profit ' + (pr > 0 ? '+' : '') + fmt(pr) : '') : 'picks prices from a live check') + '</span>';
     $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking market prices…' : phase === 'break' ? 'Taking a short break…' : running ? '● Running' : haveServices() ? (haveSearch() ? 'Ready' : 'Search once in the market, then Start') : 'Open the FUT Web App & sign in');
     $('fs-status').style.color = running || phase === 'checking' ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
   }
