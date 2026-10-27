@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FUT Snipe — Remote</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0b1017; color: #eaf0f6; font: 15px/1.45 -apple-system, system-ui, sans-serif; padding: 16px; padding-bottom: 40px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+    .brand .logo { font-size: 26px; } .brand .name { font-weight: 800; font-size: 19px; }
+    .brand .tag { font-size: 12px; color: #7f93a8; }
+    .tiles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .tile { background: #172231; border: 1px solid #223041; border-radius: 14px; padding: 12px 8px; text-align: center; }
+    .tile .l { font-size: 10px; letter-spacing: .6px; color: #7f93a8; text-transform: uppercase; }
+    .tile .v { font-size: 18px; font-weight: 800; margin-top: 3px; }
+    .plan { display: grid; grid-template-columns: 1fr 1fr 1fr; background: #121c28; border: 1px solid #223041; border-radius: 16px; overflow: hidden; margin-bottom: 14px; }
+    .plan .c { padding: 13px 10px; border-right: 1px solid #1d2a39; } .plan .c:last-child { border-right: 0; }
+    .plan .l { font-size: 10px; letter-spacing: .5px; color: #7f93a8; text-transform: uppercase; }
+    .plan .v { font-size: 19px; font-weight: 800; margin-top: 4px; } .plan .v.cyan { color: #00CAF6; } .plan .v.green { color: #19e67d; }
+    .btn { width: 100%; border: 0; border-radius: 16px; padding: 18px; font-size: 17px; font-weight: 800; color: #05222c; background: #00CAF6; }
+    .btn.stop { background: #FF5D0B; color: #fff; }
+    .mini { width: 100%; margin-top: 10px; background: #1b2838; color: #9fb0c3; border: 0; border-radius: 14px; padding: 13px; font-size: 14px; font-weight: 600; }
+    .status { text-align: center; color: #8ea0b5; margin: 14px 0 0; font-size: 13px; }
+    #conn { text-align: center; font-size: 12px; margin-top: 6px; }
+    pre { margin-top: 12px; background: #0d141d; border: 1px solid #223041; border-radius: 12px; padding: 10px; max-height: 40vh; overflow: auto; white-space: pre-wrap; color: #7f93a8; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="brand"><span class="logo">⚡</span><div><div class="name">FUT Snipe</div><div class="tag">phone remote</div></div></div>
+  <div class="tiles">
+    <div class="tile"><div class="l">Coins</div><div class="v" id="coins">—</div></div>
+    <div class="tile"><div class="l">Search</div><div class="v" id="search">—</div></div>
+    <div class="tile"><div class="l">Bought</div><div class="v" id="buys">0</div></div>
+  </div>
+  <div class="plan">
+    <div class="c"><div class="l">Snipe under</div><div class="v cyan" id="pmax">—</div></div>
+    <div class="c"><div class="l">Sell at</div><div class="v" id="psell">—</div></div>
+    <div class="c"><div class="l">Profit</div><div class="v green" id="pprof">—</div></div>
+  </div>
+  <button class="btn" id="go">Check price &amp; Start</button>
+  <button class="mini" id="suggest">Suggest prices</button>
+  <div class="status" id="status">Connecting…</div>
+  <div id="conn" style="color:#ff9a6b">● offline</div>
+  <pre id="log"></pre>
+
+  <script>
+    var ws, busy = false;
+    var $ = function (id) { return document.getElementById(id); };
+    function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
+    function send(cmd) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'cmd', cmd: cmd })); }
+    $('go').onclick = function () { send(busy ? 'stop' : 'start'); };
+    $('suggest').onclick = function () { send('suggest'); };
+
+    function paint(s) {
+      $('coins').textContent = s.coins != null ? (s.coins >= 1e6 ? (s.coins / 1e6).toFixed(2) + 'M' : fmt(s.coins)) : '—';
+      $('search').textContent = s.haveSearch ? '✓' : '—'; $('search').style.color = s.haveSearch ? '#19e67d' : '#e7c37a';
+      $('buys').textContent = s.buys || 0;
+      $('pmax').textContent = s.snipeUnder ? fmt(s.snipeUnder) : '—';
+      $('psell').textContent = s.sellAt ? fmt(s.sellAt) : '—';
+      $('pprof').textContent = s.profit == null ? '—' : (s.profit > 0 ? '+' + fmt(s.profit) : fmt(s.profit));
+      busy = s.running || s.phase === 'checking';
+      var go = $('go'); go.className = 'btn' + (busy ? ' stop' : '');
+      go.textContent = busy ? (s.phase === 'checking' ? 'Stop price check' : 'Stop sniping') : 'Check price & Start';
+      $('status').textContent = s.stopReason ? '■ ' + s.stopReason : (s.phase === 'checking' ? 'Checking market prices…' : s.phase === 'break' ? 'Taking a break…' : s.running ? '● Running — ' + s.searches + ' searches' : s.servicesReady ? (s.haveSearch ? 'Ready' : 'Search once in the market on the PC') : 'Sign into the FUT Web App on the PC');
+      if (s.log) $('log').textContent = s.log.join('\n');
+    }
+    function connect() {
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+      ws.onopen = function () { $('conn').textContent = '● connected'; $('conn').style.color = '#19e67d'; };
+      ws.onclose = function () { $('conn').textContent = '● offline — reconnecting'; $('conn').style.color = '#ff9a6b'; setTimeout(connect, 1500); };
+      ws.onmessage = function (e) { try { var m = JSON.parse(e.data); if (m.type === 'state') paint(m.state); } catch (x) {} };
+    }
+    connect();
+  </script>
+</body>
+</html>
