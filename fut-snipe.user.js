@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      2.3.1
-// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Tabbed UI, Live Filters, Stats, teal price tags, Normal-snipe calibration, fixed-margin snipe, auto-list after every buy, running lock screen, console logging. No third-party servers.
+// @version      2.3.2
+// @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. Tabbed UI, Live Filters, Stats, teal price tags, Normal-snipe calibration, fixed-profit snipe (same coins/card), auto-list after every buy, lock screen, console logging. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
 // @match        *://www.ea.com/*fifa/ultimate-team/web-app/*
@@ -23,7 +23,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '2.3.1';
+  var VERSION = '2.3.2';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
@@ -69,13 +69,13 @@
   function stepFor(p) { return p < 1000 ? 50 : p < 10000 ? 100 : p < 50000 ? 250 : p < 100000 ? 500 : 1000; }
   function roundStep(p) { var s = stepFor(p); return Math.max(150, Math.round(p / s) * s); }
   function floorStep(p) { var s = stepFor(p); return Math.max(150, Math.floor(p / s) * s); }
-  // Fixed margin: sell at the live price; buy the LOWER of (price - margin%) and (break-even - minProfit),
-  // so the result always clears both the % target and the minimum coin profit after EA's 5% tax.
+  // Fixed profit: sell at the live price, and buy low enough to clear the SAME coin profit on every
+  // card (after EA's 5% tax). Price-step rounding nudges the buy down a touch, so profit lands around
+  // target..target+100 — e.g. target 500 gives ~500-600 whether the card is 2k or 80k.
   function computeFixed(cardP) {
     var sell = roundStep(cardP);
-    var byPct = cardP * (1 - (cfg.marginPct || 0) / 100);
-    var byProfit = Math.floor(sell * (1 - EA_TAX)) - (cfg.minProfit || 0);
-    var buy = floorStep(Math.min(byPct, byProfit));
+    var target = cfg.minProfit || 0;
+    var buy = floorStep(Math.floor(sell * (1 - EA_TAX)) - target);
     return { sell: sell, buy: buy, profit: Math.floor(sell * (1 - EA_TAX)) - buy };
   }
 
@@ -240,14 +240,14 @@
           paintBadges();
         }
         if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0]).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
-        // Fixed margin: read the live price once, set buy/sell from marginPct + minProfit, then snipe.
+        // Fixed profit: read the live price once, set buy/sell for a flat profit per card, then snipe.
         if (finding) {
           if (cands.length) {
             var cardP = stats.marketMedian || cands[0].p;
             var plan = computeFixed(cardP);
             cfg.maxBuy = plan.buy; cfg.sellAt = plan.sell; autoPriced = true; finding = false; phase = 'running';
             log('fixed: live price ' + cardP + ' -> buy ' + plan.buy + ', sell ' + plan.sell + ' (+' + plan.profit + '/card)');
-            console.log('[FUT Snipe] Fixed margin: buy ' + plan.buy + ', sell ' + plan.sell + ', profit +' + plan.profit);
+            console.log('[FUT Snipe] Fixed profit: buy ' + plan.buy + ', sell ' + plan.sell + ', profit +' + plan.profit);
             render();
           } else {
             log('fixed: no listings yet - searching...'); render();
@@ -339,8 +339,8 @@
     cfg.maxBuy = 0; autoPriced = false; gotRange = false; startCoins = coins();
     stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0; stats.spent = 0; stats.est = 0;
     running = true; phase = 'finding'; stopReason = ''; startTs = Date.now();
-    log('fixed margin — reading the live price, then buying ' + (cfg.marginPct || 0) + '% under (min +' + (cfg.minProfit || 0) + ')…');
-    console.log('[FUT Snipe] Fixed-margin start — finding price');
+    log('fixed profit — reading the live price, then buying for ~' + (cfg.minProfit || 0) + ' profit/card…');
+    console.log('[FUT Snipe] Fixed-profit start — finding price');
     render(); snipeLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
   function stopAll() { if (running) requestStop('stopped by you'); }
@@ -398,7 +398,7 @@
   function diag() {
     try { var row = document.querySelector('li.listFUTItem, .listFUTItem'); if (row) lastCardHTML = row.outerHTML.slice(0, 1200); } catch (e) {}
     var s = svc(), I = s && s.Item;
-    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, autoPrice: cfg.autoPrice, autoPriced: autoPriced, autoList: cfg.autoList, speed: cfg.speed, normalMode: normalMode, fixedMode: fixedMode, marginPct: cfg.marginPct, minProfit: cfg.minProfit, calPrice: calPrice, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, pricesCached: Object.keys(priceCache).length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
+    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, autoPrice: cfg.autoPrice, autoPriced: autoPriced, autoList: cfg.autoList, speed: cfg.speed, normalMode: normalMode, fixedMode: fixedMode, minProfit: cfg.minProfit, calPrice: calPrice, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, pricesCached: Object.keys(priceCache).length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
     var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -504,10 +504,9 @@
       '</div>' +
       '<button class="fs-btn fs-go" id="fs-go"></button>' +
       '<button class="fs-btn" id="fs-normal" style="margin-top:9px;background:#13324a;color:#9fe6ff">⚡ Normal snipe<span class="sub">auto-finds the price where only a few fresh drops show</span></button>' +
-      '<button class="fs-btn" id="fs-fixed" style="margin-top:9px;background:#0f3b2e;color:#9fe6c4">⚡ Start (fixed margin)<span class="sub" id="fs-fixsub"></span></button>' +
+      '<button class="fs-btn" id="fs-fixed" style="margin-top:9px;background:#0f3b2e;color:#9fe6c4">⚡ Start (fixed profit)<span class="sub" id="fs-fixsub"></span></button>' +
       '<div class="fs-rows" style="margin-top:9px">' +
-        sliderRow('📉', 'Buy under live price', 'marginPct', 2, 20, 1, '%') +
-        row('🎯', 'Min profit (coins)', 'minProfit') +
+        row('🎯', 'Target profit / card', 'minProfit') +
       '</div>' +
       '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-diag">Copy diag</button></div>' +
       '<details class="fs-sec"><summary>Prices &amp; limits</summary><div class="fs-card" style="margin-top:8px"><div class="fs-cols">' +
@@ -636,7 +635,7 @@
     var i2, sws = panel.querySelectorAll('[data-sw]'); for (i2 = 0; i2 < sws.length; i2++) sws[i2].className = 'fs-sw' + (cfg[sws[i2].getAttribute('data-sw')] ? ' on' : '');
     var segs = panel.querySelectorAll('[data-seg]'); for (i2 = 0; i2 < segs.length; i2++) { var sb = segs[i2]; sb.className = 'fs-sg' + (Number(sb.getAttribute('data-val')) === cfg[sb.getAttribute('data-seg')] ? ' on' : ''); }
     if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
-    if ($('fs-fixsub')) $('fs-fixsub').textContent = 'buy ' + (cfg.marginPct || 0) + '% under the live price · min +' + fmt(cfg.minProfit || 0);
+    if ($('fs-fixsub')) $('fs-fixsub').textContent = 'sell at the live price · make ~' + fmt(cfg.minProfit || 0) + ' per card';
 
     var m = effectiveMax(), s = plannedSell(), pr = estProfit();
     if ($('fs-hero-max')) $('fs-hero-max').textContent = m ? fmt(m) : (haveSearch() ? (cfg.autoPrice ? 'Auto' : '—') : 'Search');
