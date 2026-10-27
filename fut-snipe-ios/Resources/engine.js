@@ -10,26 +10,29 @@
   if (!/ultimate-team\/web-app/i.test(location.href)) return;
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '2.0.0';
+  var VERSION = '2.1.0';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
     autoPrice: 1, margin: 250, maxBuy: 0, sellAt: 0, markupPercent: 0, runMinutes: 0, speed: 1, badges: 1,
-    searchMinMs: 4000, searchJitterMs: 3000, buyGapMinMs: 700, buyGapMaxMs: 1600,
-    breakEvery: 25, breakMinMs: 60000, breakMaxMs: 180000, sessionBuyCap: 15, dailyBuyCap: 150
+    searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150
   };
-  var HARD_FLOOR_MS = 2000, EA_TAX = 0.05;
+  var HARD_FLOOR_MS = 300, EA_TAX = 0.05;
   function load() { try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch (e) { return Object.assign({}, DEFAULTS); } }
   function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch (e) {} }
   var cfg = load();
+  // Speed sets only the search/buy cadence (breaks are configured separately).
+  // Turbo ~2 searches/sec, Normal 1 per 2.5s, Night 1 per 6.5s (for overnight runs).
   function applySpeed() {
     var s = cfg.speed | 0;
-    if (s === 0) { cfg.searchMinMs = 7000; cfg.searchJitterMs = 4000; cfg.buyGapMinMs = 1200; cfg.buyGapMaxMs = 2500; cfg.breakEvery = 15; }
-    else if (s === 2) { cfg.searchMinMs = 2200; cfg.searchJitterMs = 1200; cfg.buyGapMinMs = 450; cfg.buyGapMaxMs = 950; cfg.breakEvery = 35; }
-    else { cfg.searchMinMs = 4000; cfg.searchJitterMs = 3000; cfg.buyGapMinMs = 700; cfg.buyGapMaxMs = 1600; cfg.breakEvery = 25; }
+    if (s === 2) { cfg.searchMinMs = 500; cfg.searchJitterMs = 150; cfg.buyGapMinMs = 300; cfg.buyGapMaxMs = 700; }
+    else if (s === 0) { cfg.searchMinMs = 6500; cfg.searchJitterMs = 800; cfg.buyGapMinMs = 900; cfg.buyGapMaxMs = 1800; }
+    else { cfg.searchMinMs = 2500; cfg.searchJitterMs = 400; cfg.buyGapMinMs = 500; cfg.buyGapMaxMs = 1100; }
   }
+  function speedHint() { var s = cfg.speed | 0; return s === 2 ? '~2 searches / sec' : s === 0 ? '1 search / 6.5s · overnight' : '1 search / 2.5s'; }
   applySpeed();
 
   function lsGet(k, d) { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(d)); } catch (e) { return d; } }
@@ -226,7 +229,7 @@
         }
       }
       render();
-      if (stats.sinceBreak >= cfg.breakEvery) { stats.sinceBreak = 0; var br = rand(cfg.breakMinMs, cfg.breakMaxMs); phase = 'break'; log('break ' + Math.round(br / 1000) + 's'); render(); for (var t = 0; t < br && running; t += 500) await sleep(500); phase = 'running'; render(); }
+      if (stats.sinceBreak >= cfg.breakEvery) { stats.sinceBreak = 0; var base = Math.max(5, cfg.breakSec) * 1000; var br = rand(Math.round(base * 0.8), Math.round(base * 1.2)); phase = 'break'; log('break ' + Math.round(br / 1000) + 's (after ' + cfg.breakEvery + ' searches)'); render(); for (var t = 0; t < br && running; t += 500) await sleep(500); phase = 'running'; render(); }
       else { var w = Math.max(HARD_FLOOR_MS, cfg.searchMinMs + rand(0, cfg.searchJitterMs)); for (var x = 0; x < w && running; x += 250) await sleep(250); }
     }
   }
@@ -237,7 +240,8 @@
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     if (!haveSearch()) { blockMsg = 'Pick a player in the market (search once) or load a filter, then Start.'; render(); return; }
     if (!cfg.autoPrice && effectiveMax() <= 0) { blockMsg = 'Set a Snipe-under price, or turn Auto price on.'; render(); return; }
-    autoPriced = effectiveMax() > 0; gotRange = false; startCoins = coins();
+    if (cfg.autoPrice) { autoPriced = false; cfg.maxBuy = 0; } else { autoPriced = effectiveMax() > 0; }
+    gotRange = false; startCoins = coins();
     stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0; stats.spent = 0; stats.est = 0;
     running = true; phase = 'running'; stopReason = ''; startTs = Date.now();
     log(cfg.autoPrice && !autoPriced ? 'starting — auto price from live market…' : 'sniping under ' + effectiveMax() + (plannedSell() ? ', relist ' + plannedSell() : ''));
@@ -255,25 +259,44 @@
   function loadFilter(i) { var f = filters[i]; if (!f) return; capturedFromUrl = Object.assign({ __fromUs: true }, f.crit); capturedCriteria = null; capturedPlain = Object.assign({}, f.crit); gotRange = false; autoPriced = false; tab = 'snipe'; blockMsg = ''; log('loaded filter: ' + f.name); render(); }
   function deleteFilter(i) { filters.splice(i, 1); lsSet(FILT_KEY, filters); render(); }
 
-  // ---------- price badges on market cards (best-effort, cached like their marketPrice) ----------
-  var badgeTimer = null;
-  function paintBadges() {
-    if (!cfg.badges) return;
-    if (badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 250);
+  // ---------- price tags on cards (teal pill like theirs; cached per player, no extra EA calls) ----------
+  var badgeTimer = null, badgeObs = null;
+  function startBadgeObserver() {
+    if (badgeObs || !window.MutationObserver || !document.body) return;
+    badgeObs = new MutationObserver(function () { paintBadges(); });
+    try { badgeObs.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+  }
+  function paintBadges() { if (!cfg.badges) return; if (badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 300); }
+  function removeBadges() { try { var b = document.querySelectorAll('.fs-badge'); for (var i = 0; i < b.length; i++) b[i].parentNode && b[i].parentNode.removeChild(b[i]); } catch (e) {} }
+  // Best-effort read of a player id from a rendered card (varies across web-app versions).
+  function cardDefId(el) {
+    try {
+      if (!el || !el.getAttribute) return null;
+      var a = el.getAttribute('data-definition-id') || el.getAttribute('data-def-id') || el.getAttribute('data-resource-id');
+      if (a) return a;
+      var img = el.querySelector && el.querySelector('img[src*="players"], img[src*="/p/"], img[src*="futhead"], .player img, .ut-item-view img');
+      if (img) { var m = (img.getAttribute('src') || '').match(/(\d{5,7})\.(?:png|webp|avif)/); if (m) return m[1]; }
+    } catch (e) {}
+    return null;
   }
   function doPaintBadges() {
+    if (badgeObs) badgeObs.disconnect();
     try {
-      var ref = stats.marketMedian || cachedPrice(stats.curDefId);
-      if (!(ref > 0)) return;
-      // The current search is one player, so every result card shares the same reference price.
-      var rows = document.querySelectorAll('li.listFUTItem, .listFUTItem, .has-tap-callback.listFUTItem');
+      var rows = document.querySelectorAll('li.listFUTItem, .listFUTItem, ul.paginated > li, .has-tap-callback.listFUTItem');
+      var searchRef = stats.marketMedian; // within one search, every result card is the same player
       for (var i = 0; i < rows.length; i++) {
-        var row = rows[i]; if (row.querySelector('.fs-badge')) continue;
-        var host = row.querySelector('.auction, .player, .entityContainer') || row;
-        var b = document.createElement('div'); b.className = 'fs-badge'; b.textContent = '≈ ' + fmt(ref);
-        host.appendChild(b);
+        var row = rows[i];
+        var art = row.querySelector('.ut-item-view, .cardView, .playerCard, .entityContainer, .player') || row;
+        if (art.querySelector && art.querySelector('.fs-badge')) continue;
+        var id = cardDefId(row) || cardDefId(art);
+        var price = (id && cachedPrice(id)) || searchRef;
+        if (!(price > 0)) continue;
+        try { var cs = window.getComputedStyle(art); if (cs && cs.position === 'static') art.style.position = 'relative'; } catch (e) {}
+        var b = document.createElement('div'); b.className = 'fs-badge'; b.textContent = fmt(price);
+        art.appendChild(b);
       }
     } catch (e) {}
+    if (badgeObs) { try { badgeObs.observe(document.body, { childList: true, subtree: true }); } catch (e) {} }
   }
 
   function diag() {
@@ -297,10 +320,13 @@
 
   var CSS =
     '#fs-panel *,#fs-fab,#fs-fab *{box-sizing:border-box}#fs-body{overflow-x:hidden}' +
+    '.fs-r.rcol{flex-direction:column;align-items:stretch;gap:8px}.fs-r.rcol .lab{justify-content:flex-start;width:100%}.fs-r.rcol .sv{margin-left:auto;color:#00CAF6;font-weight:800}' +
+    '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:4px;background:#2a3a4c;outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#00CAF6;border:3px solid #0b1017;box-shadow:0 1px 4px rgba(0,0,0,.4)}' +
+    '.fs-hint{font-size:11px;color:#8ea0b5;padding:0 12px 10px;margin-top:-4px}' +
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:30px;background:#00CAF6;color:#05222c;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer;font-family:-apple-system,system-ui,sans-serif}' +
     '#fs-fab .dot{position:absolute;top:8px;right:8px;width:12px;height:12px;border-radius:6px;background:#19e67d;border:2px solid #05222c;display:none}' +
     '#fs-fab.run .dot{display:block}' +
-    '.fs-badge{display:inline-block;margin:3px 4px 0;padding:2px 7px;border-radius:7px;background:#00CAF6;color:#05222c;font:700 11px/1.3 -apple-system,system-ui,sans-serif;vertical-align:middle}' +
+    '.fs-badge{position:absolute;left:50%;bottom:5px;transform:translateX(-50%);z-index:6;padding:1px 9px;border-radius:9px;background:#0b1620;border:1.5px solid #00CAF6;color:#eaf6ff;font:800 12px/1.35 -apple-system,system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.45);pointer-events:none}' +
     '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0b1017}' +
     '#fs-panel.open{display:flex}' +
     '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;padding-top:max(13px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
@@ -347,6 +373,7 @@
   function row(ic, label, key) { return '<label class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><input data-k="' + key + '" type="number" value="' + cfg[key] + '"></label>'; }
   function swRow(ic, label, key) { return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div></div>'; }
   function segRow(ic, label, key, opts) { var b = opts.map(function (o) { return '<button class="fs-sg' + (cfg[key] === o[1] ? ' on' : '') + '" data-seg="' + key + '" data-val="' + o[1] + '">' + o[0] + '</button>'; }).join(''); return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-segw">' + b + '</div></div>'; }
+  function sliderRow(ic, label, key, min, max, step, unit) { return '<div class="fs-r rcol"><div class="lab"><span class="ic">' + ic + '</span>' + label + ' <b class="sv" data-sv="' + key + '">' + cfg[key] + unit + '</b></div><input class="fs-range" data-k="' + key + '" data-unit="' + unit + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + cfg[key] + '"></div>'; }
 
   function snipeView() {
     var m = effectiveMax(), s = plannedSell(), pr = estProfit();
@@ -364,7 +391,10 @@
       '</div><div class="fs-life" id="fs-life"></div></div>' +
       '<div class="fs-rows">' +
         swRow('✨', 'Auto price', 'autoPrice') +
-        segRow('🏎️', 'Speed', 'speed', [['Slow', 0], ['Normal', 1], ['Fast', 2]]) +
+        segRow('🏎️', 'Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]]) +
+        '<div class="fs-hint" id="fs-speedhint">' + speedHint() + '</div>' +
+        sliderRow('⏸️', 'Break every', 'breakEvery', 20, 120, 5, ' searches') +
+        sliderRow('😴', 'Break length', 'breakSec', 15, 300, 5, 's') +
       '</div>' +
       '<button class="fs-btn fs-go" id="fs-go"></button>' +
       '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-diag">Copy diag</button></div>' +
@@ -428,11 +458,13 @@
     fab.onclick = function () { el.classList.add('open'); fab.style.display = 'none'; render(); };
     document.body.appendChild(fab);
 
+    // live label while dragging a slider
+    el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
     el.addEventListener('click', function (e) {
       var tg = e.target, g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
-      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; save(); render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'autoPrice' && cfg.autoPrice) autoPriced = false; if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); save(); render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
@@ -461,6 +493,11 @@
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
     if (tab !== 'snipe') return;
 
+    // keep toggles / segments reflecting cfg (body isn't rebuilt on value changes)
+    var i2, sws = panel.querySelectorAll('[data-sw]'); for (i2 = 0; i2 < sws.length; i2++) sws[i2].className = 'fs-sw' + (cfg[sws[i2].getAttribute('data-sw')] ? ' on' : '');
+    var segs = panel.querySelectorAll('[data-seg]'); for (i2 = 0; i2 < segs.length; i2++) { var sb = segs[i2]; sb.className = 'fs-sg' + (Number(sb.getAttribute('data-val')) === cfg[sb.getAttribute('data-seg')] ? ' on' : ''); }
+    if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
+
     var m = effectiveMax(), s = plannedSell(), pr = estProfit();
     if ($('fs-hero-max')) $('fs-hero-max').textContent = m ? fmt(m) : (haveSearch() ? (cfg.autoPrice ? 'Auto' : '—') : 'Search');
     if ($('fs-hero-sub')) $('fs-hero-sub').textContent = s ? ('sell ' + fmt(s)) : (cfg.autoPrice ? 'auto price from live market' : 'set a price below');
@@ -487,7 +524,7 @@
   }
 
   function boot(tries) {
-    if (!document.getElementById('fs-panel') && document.body) buildUI();
+    if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); if (cfg.badges) paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
     if ((tries || 0) < 180) setTimeout(function () { boot((tries || 0) + 1); }, 1000);
   }
