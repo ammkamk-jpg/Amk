@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      0.3.0
+// @version      0.4.0
 // @description  Self-run transfer-market sniper for the EA SPORTS FC Ultimate Team Web App, paced like a human. Replays your own search (captured two ways). Stops (never bypasses) on captcha / soft-ban. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -87,10 +87,22 @@
     } catch (e) { return null; }
   }
 
+  // The Web App's search DAO needs a real UTSearchCriteriaDTO instance (as the
+  // extension uses: `new UTSearchCriteriaDTO; n.maxBuy=…`). A plain object is rejected.
+  function ctor() { return window.UTSearchCriteriaDTO || (window.App && window.App.UTSearchCriteriaDTO) || null; }
+  function applyFields(target, src) { for (var k in src) { if (k !== '__fromUs' && src[k] !== undefined && src[k] !== '') { try { target[k] = src[k]; } catch (e) {} } } return target; }
   function buildCriteria() {
-    if (capturedCriteria) { var c = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria); if (cfg.maxBuy > 0) c.maxBuy = cfg.maxBuy; c.__fromUs = true; return c; }
-    if (capturedFromUrl) { var d = Object.assign({}, capturedFromUrl); if (cfg.maxBuy > 0) d.maxBuy = cfg.maxBuy; d.start = 0; return d; }
-    return { type: 'player', category: 'any', count: 50, start: 0, minBuy: 0, maxBuy: cfg.maxBuy || 0, minBid: 0, maxBid: 0, __fromUs: true };
+    var out;
+    if (capturedCriteria) { out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria); }
+    else {
+      var C = ctor();
+      var src = capturedFromUrl || { type: 'player', category: 'any', count: 50, minBuy: 0, maxBuy: 0, minBid: 0, maxBid: 0 };
+      out = C ? applyFields(new C(), src) : Object.assign({}, src);
+    }
+    if (cfg.maxBuy > 0) out.maxBuy = cfg.maxBuy;
+    try { out.offset = 0; } catch (e) {}
+    out.__fromUs = true;
+    return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl); }
   function priceOf(it) { return it && (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : (it._auction && it._auction.buyNowPrice))); }
@@ -113,8 +125,9 @@
         try { svc().Item.clearTransferMarketCache(); } catch (e) {}
         svc().Item.searchTransferMarket(buildCriteria(), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
-          if (resp && resp.success) {
-            var items = (resp.data && resp.data.items) || [];
+          var items = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
+          var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || items.length));
+          if (ok) {
             if (items.length && !sampleKeys.length) { try { sampleKeys = Object.keys(items[0]); samplePrice = priceOf(items[0]); } catch (e) {} }
             finish({ ok: true, items: items });
           } else finish({ ok: false, items: [], err: classify(resp) });
@@ -221,9 +234,10 @@
   function diag() {
     var s = svc(), I = s && s.Item;
     var d = {
-      version: '0.3.0',
+      version: '0.4.0',
       servicesFound: !!s,
       itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [],
+      criteriaCtor: !!ctor(),
       userReadable: coins() != null,
       capturedCriteria: !!capturedCriteria, capturedCriteriaKeys: capturedCriteria ? Object.keys(capturedCriteria) : [],
       capturedFromUrl: !!capturedFromUrl, capturedFromUrlKeys: capturedFromUrl ? Object.keys(capturedFromUrl) : [],
