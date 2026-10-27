@@ -1,0 +1,25 @@
+{
+  "name": "fut-snipe-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop app: embedded EA FC Ultimate Team Web App + sniper, with a phone remote over your LAN. Runs the account on your PC; control it from your iPhone's browser.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "local.fut.snipe.desktop",
+    "files": ["**/*"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}
