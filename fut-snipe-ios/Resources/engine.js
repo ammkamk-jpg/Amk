@@ -1,12 +1,7 @@
-
 /*
- * Not affiliated with EA or FUT Simple Trader. Its own tool, no third-party server; all
+ * Injected into the EA FC web app by the FUT Snipe iOS app. No third-party server; all
  * prices come from EA's own web app (live market + EA price range). Automating the FUT
  * market breaks EA's rules; accounts get banned / coin-wiped. Your account, your risk.
- * Paces itself and STOPS (never bypasses) on captcha / soft-ban. Nothing leaves your device.
- *
- * USE: pick a player in the FUT market (set filter, tap Search once) → open this panel →
- * tap "Start sniping". Auto price reads the live market itself; nothing to look up.
  */
 
 (function () {
@@ -15,12 +10,13 @@
   if (!/ultimate-team\/web-app/i.test(location.href)) return;
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '1.1.0';
+  var VERSION = '2.0.0';
 
   // ---------- settings ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
+  var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    autoPrice: 1, margin: 250, maxBuy: 0, sellAt: 0, markupPercent: 0, runMinutes: 0, speed: 1,
+    autoPrice: 1, margin: 250, maxBuy: 0, sellAt: 0, markupPercent: 0, runMinutes: 0, speed: 1, badges: 1,
     searchMinMs: 4000, searchJitterMs: 3000, buyGapMinMs: 700, buyGapMaxMs: 1600,
     breakEvery: 25, breakMinMs: 60000, breakMaxMs: 180000, sessionBuyCap: 15, dailyBuyCap: 150
   };
@@ -36,21 +32,32 @@
   }
   applySpeed();
 
+  function lsGet(k, d) { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(d)); } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
   function today() { return new Date().toISOString().slice(0, 10); }
   function dailyCount() { try { var d = JSON.parse(localStorage.getItem('futSnipe.daily') || '{}'); return d.date === today() ? (d.n | 0) : 0; } catch (e) { return 0; } }
   function addDaily(n) { try { localStorage.setItem('futSnipe.daily', JSON.stringify({ date: today(), n: dailyCount() + n })); } catch (e) {} }
-  function loadLife() { try { return Object.assign({ bought: 0, spent: 0, est: 0 }, JSON.parse(localStorage.getItem(LIFE_KEY) || '{}')); } catch (e) { return { bought: 0, spent: 0, est: 0 }; } }
-  function saveLife() { try { localStorage.setItem(LIFE_KEY, JSON.stringify(life)); } catch (e) {} }
+  function loadLife() { return lsGet(LIFE_KEY, { bought: 0, spent: 0, est: 0 }); }
+  function saveLife() { lsSet(LIFE_KEY, life); }
   var life = loadLife();
+
+  // Live Filters (saved search sets) + Stats (session history) + price cache (per card id).
+  var filters = lsGet(FILT_KEY, []);     // [{name, crit}]
+  var sessions = lsGet(SESS_KEY, []);     // [{t, buys, spent, est, net}]
+  var priceCache = lsGet(PRICE_KEY, {}); // { defId: {price, t} }  — like their marketPrice map
+  function cachePrice(id, p) { if (id == null || !(p > 0)) return; priceCache[String(id)] = { price: p, t: Date.now() }; lsSet(PRICE_KEY, priceCache); }
+  function cachedPrice(id) { var r = priceCache[String(id)]; return r ? r.price : null; }
 
   function stepFor(p) { return p < 1000 ? 50 : p < 10000 ? 100 : p < 50000 ? 250 : p < 100000 ? 500 : 1000; }
   function roundStep(p) { var s = stepFor(p); return Math.max(150, Math.round(p / s) * s); }
 
   // ---------- state ----------
   var running = false, stopReason = '', blockMsg = '', phase = 'idle', startTs = 0, autoPriced = false, gotRange = false, startCoins = null;
-  var stats = { searches: 0, buys: 0, sinceBreak: 0, spent: 0, est: 0, marketCheapest: null, marketMedian: null, eaMin: null, eaMax: null };
+  var tab = 'snipe';
+  var stats = { searches: 0, buys: 0, sinceBreak: 0, spent: 0, est: 0, marketCheapest: null, marketMedian: null, eaMin: null, eaMax: null, curDefId: null };
   var OBS = {};
-  var capturedCriteria = null, capturedFromUrl = null;
+  var capturedCriteria = null, capturedFromUrl = null, capturedPlain = null, lastCardHTML = '';
   var sampleKeys = [], samplePrice = null, tmUrls = [], lastBuy = '';
   var rand = function (a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
@@ -65,12 +72,14 @@
     ['searchTransferMarket', 'search'].forEach(function (name) {
       if (typeof s.Item[name] !== 'function') return;
       var orig = s.Item[name].bind(s.Item);
-      s.Item[name] = function (criteria) { try { if (criteria && !criteria.__fromUs) { capturedCriteria = criteria; gotRange = false; render(); } } catch (e) {} return orig.apply(null, arguments); };
+      s.Item[name] = function (criteria) { try { if (criteria && !criteria.__fromUs) { capturedCriteria = criteria; capturedPlain = plainCriteria(criteria); gotRange = false; render(); } } catch (e) {} return orig.apply(null, arguments); };
     });
     s.Item.__futWrapped = true;
   }
 
   var URLMAP = { num: 'count', start: 'start', type: 'type', maskedDefId: 'maskedDefId', cat: 'category', lev: 'level', maxb: 'maxBuy', minb: 'minBuy', micr: 'minBid', macr: 'maxBid', pos: 'preferredPosition', zone: 'zone', nat: 'nationality', leag: 'league', team: 'team', playStyle: 'playStyle', rarities: 'rarities' };
+  var FIELDS = ['type', 'category', 'level', 'maskedDefId', 'defId', 'preferredPosition', 'zone', 'nationality', 'league', 'team', 'playStyle', 'rarities', 'minBid', 'maxBid', 'minBuy', 'maxBuy', 'count'];
+  function plainCriteria(c) { var o = {}; try { FIELDS.forEach(function (k) { if (c[k] !== undefined && c[k] !== null && c[k] !== '') o[k] = c[k]; }); } catch (e) {} return o; }
   function criteriaFromUrl(u) {
     try { var q = u.split('?')[1]; if (!q) return null; var o = { __fromUs: true };
       q.split('&').forEach(function (kv) { var p = kv.split('='), k = decodeURIComponent(p[0]), v = decodeURIComponent(p[1] || ''), key = URLMAP[k]; if (!key) return; var n = Number(v); o[key] = (v !== '' && !isNaN(n)) ? n : v; });
@@ -82,20 +91,20 @@
   function buildCriteria() {
     var out;
     if (capturedCriteria) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
-    else { var C = ctor(); var src = capturedFromUrl || { type: 'player', category: 'any', count: 50, minBuy: 0, maxBuy: 0, minBid: 0, maxBid: 0 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
+    else { var C = ctor(); var src = capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50, minBuy: 0, maxBuy: 0, minBid: 0, maxBid: 0 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
     if (cfg.maxBuy > 0) out.maxBuy = cfg.maxBuy;
     try { out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
-  function haveSearch() { return !!(capturedCriteria || capturedFromUrl); }
+  function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
   function priceOf(it) { return it && ((it._auction && it._auction.buyNowPrice) != null ? it._auction.buyNowPrice : (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : null))); }
+  function defIdOf(it) { try { return (it.definitionId != null ? it.definitionId : (it._staticData && it._staticData.id) || (it.resourceId) || (it.id)) || null; } catch (e) { return null; } }
   function effectiveMax() { if (cfg.maxBuy > 0) return cfg.maxBuy; if (capturedCriteria && capturedCriteria.maxBuy > 0) return capturedCriteria.maxBuy; return 0; }
   function plannedSell() { var m = effectiveMax(); if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0 && m) return roundStep(m * (1 + cfg.markupPercent / 100)); return 0; }
   function sellPriceFor(buy) { if (cfg.sellAt > 0) return cfg.sellAt; if (cfg.markupPercent > 0) return roundStep(buy * (1 + cfg.markupPercent / 100)); return 0; }
   function estProfit() { var m = effectiveMax(), s = plannedSell(); if (!s || !m) return null; return Math.floor(s * (1 - EA_TAX)) - m; }
   function sessionNet() { return (startCoins != null && coins() != null) ? coins() - startCoins : null; }
 
-  // EA's official price range for a card (the green min/max) — a real, on-device reference.
   function priceLimits(item) {
     return new Promise(function (res) {
       try {
@@ -157,7 +166,14 @@
     };
   })();
 
-  function requestStop(reason) { running = false; phase = 'idle'; stopReason = reason; log('STOP: ' + reason); render(); }
+  function recordSession() {
+    var net = sessionNet();
+    if (stats.buys > 0 || (net != null && net !== 0)) {
+      sessions.unshift({ t: Date.now(), buys: stats.buys, spent: stats.spent, est: stats.est, net: net });
+      sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
+    }
+  }
+  function requestStop(reason) { running = false; phase = 'idle'; stopReason = reason; recordSession(); log('STOP: ' + reason); render(); }
 
   function deriveAuto(prices) {
     if (!prices.length) return false;
@@ -184,8 +200,11 @@
         var cands = [];
         for (var i = 0; i < r.items.length; i++) { var p = priceOf(r.items[i]); if (p && p > 0) cands.push({ it: r.items[i], p: p }); }
         cands.sort(function (a, b) { return a.p - b.p; });
-        if (cands.length) { stats.marketCheapest = cands[0].p; stats.marketMedian = cands[Math.floor(cands.length / 2)].p; }
-        // Fetch EA's official price range once per run (for the reference display).
+        if (cands.length) {
+          stats.marketCheapest = cands[0].p; stats.marketMedian = cands[Math.floor(cands.length / 2)].p;
+          var did = defIdOf(cands[0].it); stats.curDefId = did; cachePrice(did, stats.marketMedian); // cache like their marketPrice map
+          paintBadges();
+        }
         if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0]).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
         if (cfg.autoPrice && !autoPriced) { if (cands.length) deriveAuto(cands.map(function (c) { return c.p; })); else { log('no listings yet — searching…'); render(); } }
         var max = effectiveMax();
@@ -216,7 +235,7 @@
     blockMsg = '';
     if (running) return;
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
-    if (!haveSearch()) { blockMsg = 'Pick a player in the market (search once), then Start.'; render(); return; }
+    if (!haveSearch()) { blockMsg = 'Pick a player in the market (search once) or load a filter, then Start.'; render(); return; }
     if (!cfg.autoPrice && effectiveMax() <= 0) { blockMsg = 'Set a Snipe-under price, or turn Auto price on.'; render(); return; }
     autoPriced = effectiveMax() > 0; gotRange = false; startCoins = coins();
     stats.searches = 0; stats.buys = 0; stats.sinceBreak = 0; stats.spent = 0; stats.est = 0;
@@ -227,9 +246,40 @@
   function stopAll() { if (running) requestStop('stopped by you'); }
   function resetLife() { life = { bought: 0, spent: 0, est: 0 }; saveLife(); render(); }
 
+  // ---------- Live Filters ----------
+  function saveCurrentFilter() {
+    var crit = capturedPlain || capturedFromUrl; if (!crit) { blockMsg = 'Search a player once first, then save it as a filter.'; render(); return; }
+    var name = (window.prompt && window.prompt('Name this filter', 'Filter ' + (filters.length + 1))) || ('Filter ' + (filters.length + 1));
+    filters.unshift({ name: name, crit: Object.assign({}, crit) }); filters = filters.slice(0, 40); lsSet(FILT_KEY, filters); render();
+  }
+  function loadFilter(i) { var f = filters[i]; if (!f) return; capturedFromUrl = Object.assign({ __fromUs: true }, f.crit); capturedCriteria = null; capturedPlain = Object.assign({}, f.crit); gotRange = false; autoPriced = false; tab = 'snipe'; blockMsg = ''; log('loaded filter: ' + f.name); render(); }
+  function deleteFilter(i) { filters.splice(i, 1); lsSet(FILT_KEY, filters); render(); }
+
+  // ---------- price badges on market cards (best-effort, cached like their marketPrice) ----------
+  var badgeTimer = null;
+  function paintBadges() {
+    if (!cfg.badges) return;
+    if (badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 250);
+  }
+  function doPaintBadges() {
+    try {
+      var ref = stats.marketMedian || cachedPrice(stats.curDefId);
+      if (!(ref > 0)) return;
+      // The current search is one player, so every result card shares the same reference price.
+      var rows = document.querySelectorAll('li.listFUTItem, .listFUTItem, .has-tap-callback.listFUTItem');
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i]; if (row.querySelector('.fs-badge')) continue;
+        var host = row.querySelector('.auction, .player, .entityContainer') || row;
+        var b = document.createElement('div'); b.className = 'fs-badge'; b.textContent = '≈ ' + fmt(ref);
+        host.appendChild(b);
+      }
+    } catch (e) {}
+  }
+
   function diag() {
+    try { var row = document.querySelector('li.listFUTItem, .listFUTItem'); if (row) lastCardHTML = row.outerHTML.slice(0, 1200); } catch (e) {}
     var s = svc(), I = s && s.Item;
-    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], itemPileTransfer: (window.ItemPile && window.ItemPile.TRANSFER) != null, criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedFromUrl: !!capturedFromUrl, autoPrice: cfg.autoPrice, autoPriced: autoPriced, speed: cfg.speed, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionSpent: stats.spent, sessionEst: stats.est, sessionNet: sessionNet(), lifetime: life, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, recentMarketUrls: tmUrls };
+    var d = { version: VERSION, servicesFound: !!s, itemMethods: I ? ['searchTransferMarket', 'search', 'bid', 'list', 'move', 'requestMarketData', 'clearTransferMarketCache'].filter(function (m) { return typeof I[m] === 'function'; }) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, autoPrice: cfg.autoPrice, autoPriced: autoPriced, speed: cfg.speed, effectiveMax: effectiveMax(), plannedSell: plannedSell(), estProfit: estProfit(), marketCheapest: stats.marketCheapest, marketMedian: stats.marketMedian, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, pricesCached: Object.keys(priceCache).length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
     var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -242,18 +292,29 @@
   function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
   function fmtk(n) { return n == null ? '—' : (Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1e4 ? Math.round(n / 1e3) + 'k' : fmt(n)); }
   function signed(n) { return n == null ? '—' : (n > 0 ? '+' + fmtk(n) : fmtk(n)); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function ago(t) { var d = (Date.now() - t) / 1000; if (d < 60) return 'just now'; if (d < 3600) return Math.round(d / 60) + 'm ago'; if (d < 86400) return Math.round(d / 3600) + 'h ago'; return Math.round(d / 86400) + 'd ago'; }
 
   var CSS =
+    '#fs-panel *,#fs-fab,#fs-fab *{box-sizing:border-box}#fs-body{overflow-x:hidden}' +
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:30px;background:#00CAF6;color:#05222c;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer;font-family:-apple-system,system-ui,sans-serif}' +
     '#fs-fab .dot{position:absolute;top:8px;right:8px;width:12px;height:12px;border-radius:6px;background:#19e67d;border:2px solid #05222c;display:none}' +
     '#fs-fab.run .dot{display:block}' +
+    '.fs-badge{display:inline-block;margin:3px 4px 0;padding:2px 7px;border-radius:7px;background:#00CAF6;color:#05222c;font:700 11px/1.3 -apple-system,system-ui,sans-serif;vertical-align:middle}' +
     '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0b1017}' +
     '#fs-panel.open{display:flex}' +
-    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
-    '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:18px}#fs-head .v{opacity:.5;font-size:11px;margin-left:6px}' +
+    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;padding-top:max(13px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
+    '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:17px}#fs-head .v{opacity:.5;font-size:11px;margin-left:6px}' +
     '#fs-head .coins{font-size:14px;font-weight:700;color:#f3c969;background:#1b2838;border-radius:10px;padding:7px 12px}' +
-    '#fs-min{background:#1b2838;color:#cdd8e4;border:0;border-radius:10px;width:40px;height:40px;font-size:20px;margin-left:10px}' +
+    '#fs-min{background:#1b2838;color:#cdd8e4;border:0;border-radius:10px;width:38px;height:38px;font-size:19px;margin-left:10px}' +
+    '#fs-tabs{display:flex;gap:6px;padding:10px 14px 0;background:#101722}' +
+    '.fs-tab{flex:1;text-align:center;padding:10px;border-radius:10px 10px 0 0;background:#0e1620;color:#8ea0b5;font-weight:700;font-size:13px}' +
+    '.fs-tab.on{background:#0b1017;color:#00CAF6;box-shadow:inset 0 -2px 0 #00CAF6}' +
     '#fs-body{flex:1;overflow:auto;padding:14px;padding-bottom:max(24px,env(safe-area-inset-bottom));width:100%;max-width:520px;margin:0 auto}' +
+    '.fs-hero{background:linear-gradient(135deg,#0f2630,#121c28);border:1px solid #1d4350;border-radius:16px;padding:16px;margin-bottom:12px;text-align:center}' +
+    '.fs-hero .big{font-size:34px;font-weight:900;color:#00CAF6;letter-spacing:.5px}' +
+    '.fs-hero .sub{font-size:12px;color:#8ea0b5;margin-top:2px}' +
+    '.fs-hero .prof{font-size:15px;font-weight:800;margin-top:8px}' +
     '.fs-card{background:#121c28;border:1px solid #223041;border-radius:14px;overflow:hidden;margin-bottom:11px}' +
     '.fs-ch{font-size:9.5px;letter-spacing:.6px;color:#6f8498;text-transform:uppercase;padding:9px 12px 0}' +
     '.fs-cols{display:grid;grid-template-columns:1fr 1fr 1fr}' +
@@ -267,102 +328,162 @@
     '.fs-r input[type=number]{width:92px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:7px 8px;font-size:13px;text-align:right}' +
     '.fs-sw{width:44px;height:26px;border-radius:14px;background:#2a3a4c;position:relative;transition:.15s}.fs-sw.on{background:#00CAF6}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}.fs-sw.on:after{left:21px}' +
     '.fs-segw{display:flex;gap:4px}.fs-sg{background:#0c131b;color:#9fb0c3;border:1px solid #223041;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:600}.fs-sg.on{background:#00CAF6;color:#05222c;border-color:#00CAF6}' +
-    '.fs-btn{width:100%;border:0;border-radius:13px;padding:14px;font-size:15px;font-weight:800;letter-spacing:.2px}' +
+    '.fs-btn{width:100%;border:0;border-radius:13px;padding:15px;font-size:16px;font-weight:800;letter-spacing:.2px}' +
     '.fs-go{background:#00CAF6;color:#05222c}.fs-stop{background:#FF5D0B;color:#fff}' +
     '.fs-btn .sub{display:block;font-size:11px;font-weight:600;opacity:.8;margin-top:2px}' +
     '.fs-mini{display:flex;gap:8px;margin-top:9px}.fs-mini button{flex:1;background:#1b2838;color:#9fb0c3;border:0;border-radius:10px;padding:9px;font-size:12px;font-weight:600}' +
     '#fs-block{color:#ff9a6b;font-size:11.5px;margin:0 0 10px}' +
     '#fs-status{font-size:12px;color:#8ea0b5;margin:10px 2px 0;text-align:center}' +
     '#fs-log{margin:8px 0 0;max-height:104px;overflow:auto;white-space:pre-wrap;color:#7f93a8;font-size:11px;line-height:1.5}' +
-    '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:12px;padding:4px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}';
+    '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:12px;padding:4px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}' +
+    '.fs-item{display:flex;align-items:center;justify-content:space-between;background:#121c28;border:1px solid #223041;border-radius:12px;padding:12px;margin-bottom:9px}' +
+    '.fs-item .nm{font-weight:700;font-size:14px}.fs-item .de{font-size:11px;color:#7f93a8;margin-top:2px}' +
+    '.fs-item .act{display:flex;gap:7px}.fs-item .act button{border:0;border-radius:9px;padding:9px 13px;font-size:12px;font-weight:700}' +
+    '.fs-load{background:#00CAF6;color:#05222c}.fs-del{background:#2a3a4c;color:#cdd8e4}' +
+    '.fs-empty{text-align:center;color:#6f8498;font-size:13px;padding:30px 10px}' +
+    '.fs-bar{height:7px;border-radius:4px;background:#1b2836;overflow:hidden;margin-top:6px}.fs-bar i{display:block;height:100%;background:#19e67d}' +
+    '.fs-srow{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-bottom:1px solid #1b2836}.fs-srow:last-child{border:0}';
 
   function row(ic, label, key) { return '<label class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><input data-k="' + key + '" type="number" value="' + cfg[key] + '"></label>'; }
   function swRow(ic, label, key) { return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div></div>'; }
   function segRow(ic, label, key, opts) { var b = opts.map(function (o) { return '<button class="fs-sg' + (cfg[key] === o[1] ? ' on' : '') + '" data-seg="' + key + '" data-val="' + o[1] + '">' + o[0] + '</button>'; }).join(''); return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-segw">' + b + '</div></div>'; }
+
+  function snipeView() {
+    var m = effectiveMax(), s = plannedSell(), pr = estProfit();
+    var heroBig = m ? fmt(m) : (haveSearch() ? '—' : 'Search');
+    return '' +
+      '<div id="fs-block"></div>' +
+      '<div class="fs-hero"><div class="l" style="font-size:9px;letter-spacing:.5px;color:#6f8498;text-transform:uppercase">Snipe under</div>' +
+        '<div class="big" id="fs-hero-max">' + heroBig + '</div>' +
+        '<div class="sub" id="fs-hero-sub">' + (s ? ('sell ' + fmt(s)) : 'auto price from live market') + '</div>' +
+        '<div class="prof" id="fs-hero-prof"></div></div>' +
+      '<div class="fs-card"><div class="fs-ch">This run</div><div class="fs-cols">' +
+        '<div class="c"><div class="l">Bought</div><div class="v" id="fs-s-buys">0</div></div>' +
+        '<div class="c"><div class="l">Est. profit</div><div class="v g" id="fs-s-est">—</div></div>' +
+        '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
+      '</div><div class="fs-life" id="fs-life"></div></div>' +
+      '<div class="fs-rows">' +
+        swRow('✨', 'Auto price', 'autoPrice') +
+        segRow('🏎️', 'Speed', 'speed', [['Slow', 0], ['Normal', 1], ['Fast', 2]]) +
+      '</div>' +
+      '<button class="fs-btn fs-go" id="fs-go"></button>' +
+      '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-diag">Copy diag</button></div>' +
+      '<details class="fs-sec"><summary>Prices &amp; limits</summary><div class="fs-card" style="margin-top:8px"><div class="fs-cols">' +
+        '<div class="c"><div class="l">EA min</div><div class="v" id="fs-emin">—</div></div>' +
+        '<div class="c"><div class="l">EA max</div><div class="v" id="fs-emax">—</div></div>' +
+        '<div class="c"><div class="l">Cheapest now</div><div class="v c" id="fs-cheap">—</div></div>' +
+      '</div></div></details>' +
+      '<details class="fs-sec"><summary>Manual price &amp; caps</summary><div class="fs-rows" style="margin-top:8px">' +
+        row('◎', 'Snipe under', 'maxBuy') + row('🏷️', 'Sell at (0 = auto)', 'sellAt') + row('📈', 'Markup % (if Sell=0)', 'markupPercent') +
+        row('🛑', 'Session buy cap', 'sessionBuyCap') + row('🎯', 'Auto margin', 'margin') + row('⏱️', 'Run minutes (0=∞)', 'runMinutes') + row('📅', 'Daily buy cap', 'dailyBuyCap') +
+        swRow('🏷️', 'Price badges on cards', 'badges') +
+      '</div></details>' +
+      '<div id="fs-status"></div><pre id="fs-log"></pre>';
+  }
+  function filtersView() {
+    var list = filters.length ? filters.map(function (f, i) {
+      var c = f.crit || {}, bits = [];
+      if (c.maxBuy) bits.push('max ' + fmt(c.maxBuy)); if (c.minBid || c.maxBid) bits.push('bid ' + fmt(c.minBid || 0) + '-' + fmt(c.maxBid || 0));
+      if (c.level) bits.push(String(c.level)); if (c.maskedDefId || c.defId) bits.push('player'); if (c.league) bits.push('league ' + c.league); if (c.nationality) bits.push('nat ' + c.nationality);
+      return '<div class="fs-item"><div><div class="nm">' + esc(f.name) + '</div><div class="de">' + (bits.join(' · ') || 'saved search') + '</div></div>' +
+        '<div class="act"><button class="fs-load" data-load="' + i + '">Load</button><button class="fs-del" data-del="' + i + '">✕</button></div></div>';
+    }).join('') : '<div class="fs-empty">No saved filters yet.<br>Search a player in the market, then tap <b>★ Save as filter</b> on the Snipe tab.</div>';
+    return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
+      '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
+  }
+  function statsView() {
+    var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
+    var totEst = sessions.reduce(function (a, b) { return a + (b.est || 0); }, 0);
+    var totNet = sessions.reduce(function (a, b) { return a + (b.net || 0); }, 0);
+    var maxAbs = Math.max(1, Math.max.apply(null, sessions.map(function (s) { return Math.abs(s.net || s.est || 0); }).concat([1])));
+    var rows = sessions.length ? sessions.map(function (s) {
+      var val = s.net != null ? s.net : s.est; var w = Math.round(Math.abs(val || 0) / maxAbs * 100);
+      return '<div class="fs-srow"><div><div style="font-weight:700">' + signed(val) + ' coins</div><div class="de" style="font-size:11px;color:#7f93a8">' + ago(s.t) + ' · ' + (s.buys || 0) + ' bought</div><div class="fs-bar" style="width:140px"><i style="width:' + w + '%;background:' + ((val || 0) < 0 ? '#ff8a5c' : '#19e67d') + '"></i></div></div>' +
+        '<div style="text-align:right;font-size:12px;color:#8ea0b5">est ' + signed(s.est) + '</div></div>';
+    }).join('') : '<div class="fs-empty">No sessions yet.<br>Run the sniper and your results will show here.</div>';
+    return '<div class="fs-hero"><div class="l" style="font-size:9px;letter-spacing:.5px;color:#6f8498;text-transform:uppercase">All-time coins net</div>' +
+      '<div class="big" style="color:' + (totNet < 0 ? '#ff8a5c' : '#19e67d') + '">' + signed(totNet) + '</div>' +
+      '<div class="sub">' + fmtk(life.bought) + ' bought all-time · est profit ' + signed(life.est) + '</div></div>' +
+      '<div class="fs-card"><div class="fs-ch">Totals (last ' + sessions.length + ' sessions)</div><div class="fs-cols">' +
+        '<div class="c"><div class="l">Sessions</div><div class="v">' + sessions.length + '</div></div>' +
+        '<div class="c"><div class="l">Bought</div><div class="v">' + fmtk(totBuys) + '</div></div>' +
+        '<div class="c"><div class="l">Est. profit</div><div class="v g">' + signed(totEst) + '</div></div>' +
+      '</div></div>' +
+      '<div class="fs-ch" style="padding:2px 2px 8px">Session history</div>' + rows +
+      '<div class="fs-mini"><button id="fs-clearsess">Clear history</button><button id="fs-reset2">Reset all-time</button></div>';
+  }
 
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
       '<div id="fs-head"><div><span class="t">⚡ FUT Snipe</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
-      '<div id="fs-body">' +
-        '<div id="fs-block"></div>' +
-        '<div class="fs-card"><div class="fs-ch">Price — <span id="fs-src">EA range &amp; live market</span></div><div class="fs-cols">' +
-          '<div class="c"><div class="l">EA min</div><div class="v" id="fs-emin">—</div></div>' +
-          '<div class="c"><div class="l">EA max</div><div class="v" id="fs-emax">—</div></div>' +
-          '<div class="c"><div class="l">Cheapest now</div><div class="v c" id="fs-cheap">—</div></div>' +
-        '</div></div>' +
-        '<div class="fs-card"><div class="fs-ch">Snipe plan</div><div class="fs-cols">' +
-          '<div class="c"><div class="l">Snipe under</div><div class="v c" id="fs-p-max">—</div></div>' +
-          '<div class="c"><div class="l">Sell at</div><div class="v" id="fs-p-sell">—</div></div>' +
-          '<div class="c"><div class="l">Profit / card</div><div class="v g" id="fs-p-prof">—</div></div>' +
-        '</div></div>' +
-        '<div class="fs-card"><div class="fs-ch">This run</div><div class="fs-cols">' +
-          '<div class="c"><div class="l">Bought</div><div class="v" id="fs-s-buys">0</div></div>' +
-          '<div class="c"><div class="l">Est. profit</div><div class="v g" id="fs-s-est">—</div></div>' +
-          '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
-        '</div><div class="fs-life" id="fs-life"></div></div>' +
-        '<div class="fs-rows">' +
-          swRow('✨', 'Auto price', 'autoPrice') +
-          segRow('🏎️', 'Speed', 'speed', [['Slow', 0], ['Normal', 1], ['Fast', 2]]) +
-          row('◎', 'Snipe under', 'maxBuy') +
-          row('🏷️', 'Sell at (0 = auto)', 'sellAt') +
-          row('📈', 'Markup % (if Sell=0)', 'markupPercent') +
-          row('🛑', 'Session buy cap', 'sessionBuyCap') +
-        '</div>' +
-        '<button class="fs-btn fs-go" id="fs-go"></button>' +
-        '<div class="fs-mini"><button id="fs-reset">Reset totals</button><button id="fs-diag">Copy diag</button></div>' +
-        '<details class="fs-sec"><summary>Advanced</summary><div class="fs-rows" style="margin-top:8px">' +
-          row('🎯', 'Auto margin (under cheapest)', 'margin') + row('⏱️', 'Run minutes (0 = ∞)', 'runMinutes') +
-          row('📅', 'Daily buy cap', 'dailyBuyCap') +
-        '</div></details>' +
-        '<div id="fs-status"></div><pre id="fs-log"></pre>' +
-      '</div>';
+      '<div id="fs-tabs">' +
+        '<div class="fs-tab" data-tab="snipe">Snipe</div>' +
+        '<div class="fs-tab" data-tab="filters">Filters</div>' +
+        '<div class="fs-tab" data-tab="stats">Stats</div>' +
+      '</div><div id="fs-body"></div>';
     document.body.appendChild(el);
-    // Floating launcher button — tap to open the full-screen panel, tap ✕ to close it.
     var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '⚡<span class="dot"></span>';
     fab.onclick = function () { el.classList.add('open'); fab.style.display = 'none'; render(); };
     document.body.appendChild(fab);
+
     el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
     el.addEventListener('click', function (e) {
-      var sw = e.target.getAttribute && e.target.getAttribute('data-sw');
-      if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; e.target.className = 'fs-sw' + (cfg[sw] ? ' on' : ''); save(); render(); return; }
-      var seg = e.target.getAttribute && e.target.getAttribute('data-seg');
-      if (seg) { cfg[seg] = Number(e.target.getAttribute('data-val')) || 0; if (seg === 'speed') applySpeed(); save();
-        var wrap = e.target.parentNode; Array.prototype.forEach.call(wrap.children, function (c) { c.className = 'fs-sg' + (Number(c.getAttribute('data-val')) === cfg[seg] ? ' on' : ''); }); render(); }
+      var tg = e.target, g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
+      var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); save(); render(); return; }
+      var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
+      var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
+      switch (tg.id) {
+        case 'fs-go': if (running) stopAll(); else startFlow(); break;
+        case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
+        case 'fs-diag': diag(); break;
+        case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
+        case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
+        case 'fs-reset2': resetLife(); break;
+      }
     });
-    el.querySelector('#fs-go').onclick = function () { if (running) stopAll(); else startFlow(); };
-    el.querySelector('#fs-reset').onclick = resetLife;
-    el.querySelector('#fs-diag').onclick = diag;
-    el.querySelector('#fs-min').onclick = function () { el.classList.remove('open'); fab.style.display = ''; };
     render();
   }
 
   function render() {
     var $ = function (id) { return document.getElementById(id); };
     var fb = $('fs-fab'); if (fb) fb.className = running ? 'run' : '';
-    if (!$('fs-body')) return;
+    var panel = $('fs-panel'); if (!panel) return;
+    // tabs
+    var tabs = panel.querySelectorAll('.fs-tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
+    // body (only rebuild on tab change to keep inputs usable)
+    var body = $('fs-body');
+    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : snipeView(); }
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
-    $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
-    $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
-    $('fs-cheap').textContent = stats.marketCheapest != null ? fmt(stats.marketCheapest) : (haveSearch() ? '…' : '—');
+    if (tab !== 'snipe') return;
+
     var m = effectiveMax(), s = plannedSell(), pr = estProfit();
-    $('fs-p-max').textContent = m ? fmt(m) : '—';
-    $('fs-p-sell').textContent = s ? fmt(s) : '—';
-    $('fs-p-prof').textContent = pr == null ? '—' : signed(pr);
-    $('fs-s-buys').textContent = stats.buys;
-    $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—';
-    var net = sessionNet(); $('fs-s-net').textContent = net == null ? '—' : signed(net);
-    $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : '');
-    $('fs-life').textContent = 'All-time: ' + fmtk(life.bought) + ' bought · est profit ' + signed(life.est);
-    $('fs-block').textContent = blockMsg || '';
-    var go = $('fs-go'), busy = running;
-    go.className = 'fs-btn ' + (busy ? 'fs-stop' : 'fs-go');
-    go.innerHTML = busy
-      ? 'Stop sniping<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
-      : 'Start sniping<span class="sub">' + (cfg.autoPrice && !(m > 0) ? 'auto price · finds it from the live market' : (m ? 'under ' + fmt(m) + (pr != null ? ' · ' + signed(pr) + '/card' : '') : 'set a snipe-under price')) + '</span>';
-    $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'break' ? 'Taking a short break…' : running ? '● Running' : haveServices() ? (haveSearch() ? 'Ready' : 'Pick a player in the market, then Start') : 'Open the FUT Web App & sign in');
-    $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
+    if ($('fs-hero-max')) $('fs-hero-max').textContent = m ? fmt(m) : (haveSearch() ? (cfg.autoPrice ? 'Auto' : '—') : 'Search');
+    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = s ? ('sell ' + fmt(s)) : (cfg.autoPrice ? 'auto price from live market' : 'set a price below');
+    if ($('fs-hero-prof')) { $('fs-hero-prof').textContent = pr == null ? '' : (signed(pr) + ' / card'); $('fs-hero-prof').style.color = pr != null && pr < 0 ? '#ff8a5c' : '#19e67d'; }
+    if ($('fs-emin')) $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
+    if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
+    if ($('fs-cheap')) $('fs-cheap').textContent = stats.marketCheapest != null ? fmt(stats.marketCheapest) : (haveSearch() ? '…' : '—');
+    if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
+    if ($('fs-s-est')) $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—';
+    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : ''); }
+    if ($('fs-life')) $('fs-life').textContent = 'All-time: ' + fmtk(life.bought) + ' bought · est profit ' + signed(life.est);
+    if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
+    var go = $('fs-go');
+    if (go) {
+      go.className = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go');
+      go.innerHTML = running
+        ? 'Stop sniping<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
+        : 'Start sniping<span class="sub">' + (cfg.autoPrice && !(m > 0) ? 'auto price · finds it from the live market' : (m ? 'under ' + fmt(m) + (pr != null ? ' · ' + signed(pr) + '/card' : '') : 'set a snipe-under price')) + '</span>';
+    }
+    if ($('fs-status')) {
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'break' ? 'Taking a short break…' : running ? '● Running' : haveServices() ? (haveSearch() ? 'Ready' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
+    }
   }
 
   function boot(tries) {
