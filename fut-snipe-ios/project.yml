@@ -1,0 +1,38 @@
+name: FUTSnipe
+options:
+  bundleIdPrefix: local.futsnipe
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+targets:
+  FUTSnipe:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources
+    info:
+      path: Resources/Info.generated.plist
+      properties:
+        CFBundleDisplayName: FUT Snipe
+        CFBundleName: FUTSnipe
+        CFBundleShortVersionString: "1.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.futsnipe.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
