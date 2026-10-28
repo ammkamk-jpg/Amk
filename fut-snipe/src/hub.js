@@ -60,6 +60,7 @@
     finally { searchBase = keep.searchBase; matchId = keep.matchId; curName = keep.curName; gotRange = keep.gotRange; }
   }
   async function listAt(it, price, why) {
+    if (!(await rangeOk(it, price))) return false;
     var ok = await listItem(it, Math.max(MIN_PRICE, price - stepFor(price)), price, cfg.listDur || 3600);
     if (ok) noteList(it.id, price);
     feed(ok ? (nameOf(it) || 'Card') + ' listed for ' + fmt(price) + (why ? ' · ' + why : '') : 'Listing ' + (nameOf(it) || 'card') + ' failed', ok ? 'list' : 'stop');
@@ -98,7 +99,7 @@
     if (!force && Date.now() - lastHubPass < 180000) return;
     lastHubPass = Date.now() - rand(0, 40000);
     var items = await refreshHub(false); if (!items || !running) return;
-    if (cfg.autoClearSold) await clearSoldNow();
+    if (cfg.clearSold === 2 || (cfg.clearSold === 1 && hub.total >= TRADEPILE_MAX - 5)) await clearSoldNow(); // always / only when (nearly) full
     if (cfg.relistExpired && running) await relistExpired(items, 2);
   }
 

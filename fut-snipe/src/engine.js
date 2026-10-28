@@ -68,7 +68,10 @@
   async function checkPrice() {
     phase = 'checking'; market.probeMax = 0; market.probeCount = null;
     say('Checking price for ' + searchLabel() + '…'); render();
-    var pick = await findPrice(market.price);
+    // A player search without a rarity also returns special versions (TOTW, ...): price the normal card only.
+    var keepMatch = matchId;
+    if (searchedDefId() && !hasRarityFilter(capturedPlain || capturedFromUrl)) matchId = searchedDefId();
+    var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var sp = snipePoint(pick.price, cfg.minProfit);
@@ -93,11 +96,33 @@
     feed(ok ? searchLabel() + ' moved to transfer list (not listed)' : 'Move to transfer list failed (full?) - card is in Unassigned', ok ? 'list' : 'stop');
   }
 
+  // A special version caught by a player search: keep it on the transfer list unlisted, price-check
+  // that exact card and tell you what it's worth.
+  async function keepSpecial(item, price) {
+    await sleep(rand(1200, 3000));
+    var moved = await moveToTransfer(item);
+    feed('⚠ Special version bought for ' + fmt(price) + ' - kept ' + (moved ? 'on the transfer list' : 'in Unassigned') + ', not listed', 'stop');
+    if (!running) return;
+    var pick = await withCard(item, function () { return findPrice(price); });
+    if (pick) feed('⚠ That special card is worth ≈ ' + fmt(pick.price) + ' (you paid ' + fmt(price) + ') - list it yourself', 'price');
+  }
+  // Price range stop: EA's allowed range for this card. Unknown range = not checked (said once).
+  var rangeUnknownSaid = false;
+  async function rangeOk(item, price) {
+    if (!cfg.rangeStop) return true;
+    var lim = await priceLimits(item);
+    if (!lim) { if (!rangeUnknownSaid) { rangeUnknownSaid = true; feed('EA price range not available - range stop can\u2019t check', 'miss'); } return true; }
+    if (!outsideRange(price, lim)) return true;
+    feed('⛔ ' + fmt(price) + ' is outside EA\u2019s range ' + fmt(lim.min) + '–' + fmt(lim.max) + ' - not listed', 'stop');
+    return false;
+  }
+
   async function relist(item) {
     var sell = market.price; if (!(sell > 0)) return;
     await sleep(rand(1500, 4000)); // still lists if you tap Stop meanwhile: a bought card shouldn't sit unlisted
     var moved = await moveToTransfer(item);
     await sleep(rand(600, 1200));
+    if (!(await rangeOk(item, sell))) return requestStop('price range stop: list price ' + fmt(sell) + ' is outside EA\u2019s range');
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
     if (ok) noteList(item.id, sell);
     feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
@@ -110,17 +135,20 @@
     var r = await search(market.snipe, false, minB); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
+    var hits = r.items.filter(function (x) { return x.p <= market.snipe && x.p >= minB; }).length;
+    if (keep && cfg.tooManyStop && tooManyResults(hits)) return requestStop(hits + (hits >= 21 ? '+' : '') + ' cards at ≤ ' + fmt(market.snipe) + ' - is your price right? (too many results stop)');
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
       var price = r.items[j].p; if (price > market.snipe) break; if (price < minB) continue;
       var bal = coins(); if (bal != null && price > bal) { feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
-        var e = keep ? 0 : profitAt(market.price, price);
+        var it = r.items[j].it, special = !keep && cfg.keepSpecials && isSpecialBuy(defIdOf(it), capturedPlain || capturedFromUrl);
+        var e = keep || special ? 0 : profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + (keep ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep ? null : e); render();
-        await afterBuy(r.items[j].it);
+        feed(searchLabel() + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep || special ? null : e); render();
+        if (special) await keepSpecial(it, price); else await afterBuy(it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
@@ -149,6 +177,7 @@
   function start() {
     if (!canStart()) return;
     if (!haveSearch()) { blockMsg = 'Search a player in the transfer market (or load a filter), then Start.'; render(); return; }
+    resolveName();
     if (keepMode()) {
       if (!(cfg.keepMax > 0)) { blockMsg = 'Transfer list / Unassigned mode: set "Buy at or below" first (no price check in this mode).'; render(); return; }
       if (cfg.keepMin > cfg.keepMax) { blockMsg = 'Min price is higher than "Buy at or below".'; render(); return; }

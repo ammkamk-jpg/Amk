@@ -147,3 +147,26 @@ test("profit curve is cumulative, oldest first, skips unknown profits", () => {
   const sales = [{ profit: 300 }, { profit: null }, { profit: -100 }, { profit: 1000 }]; // newest first
   assert.deepEqual(P.profitCurve(sales), [1000, 900, 1200]);
 });
+
+test("too many results stop: 10+ cards at the buy price", () => {
+  assert.equal(P.tooManyResults(2), false);
+  assert.equal(P.tooManyResults(9), false);
+  assert.equal(P.tooManyResults(10), true);
+  assert.equal(P.tooManyResults(21), true);
+});
+
+test("price range stop", () => {
+  const lim = { min: 10000, max: 200000 };
+  assert.equal(P.outsideRange(15000, lim), false);
+  assert.equal(P.outsideRange(250000, lim), true);
+  assert.equal(P.outsideRange(9000, lim), true);
+  assert.equal(P.outsideRange(15000, null), false, "unknown range: not stopped");
+});
+
+test("special version bought by a player search", () => {
+  const special = 3 * 16777216 + 231747;
+  assert.equal(P.isSpecialBuy(231747, { rarities: [] }), false, "base card");
+  assert.equal(P.isSpecialBuy(special, { rarities: [] }), true);
+  assert.equal(P.isSpecialBuy(special, { rarities: [3] }), false, "searched with a rarity: wanted");
+  assert.equal(P.isSpecialBuy(special, { maskedDefId: 231747 }), true, "no rarities field");
+});

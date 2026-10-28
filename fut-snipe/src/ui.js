@@ -75,6 +75,14 @@
         '<div class="c"><div class="l">EA max</div><div class="v" id="fs-emax">—</div></div>' +
         '<div class="c"><div class="l">Cheapest now</div><div class="v c" id="fs-cheap">—</div></div>' +
       '</div></div></details>' +
+      '<div class="fs-ch" style="padding:6px 2px 8px">Safety stops</div><div class="fs-rows">' +
+        swRow('🧯', 'Too many results stop (10+)', 'tooManyStop') +
+        '<div class="fs-hint">Manual price only: stops before buying if a search finds 10+ cards at your price - usually a typo like 10,000 instead of 1,000.</div>' +
+        swRow('📏', 'Price range stop', 'rangeStop') +
+        '<div class="fs-hint">Stops if the list price is outside EA\u2019s allowed range for the card.</div>' +
+        swRow('💎', 'Keep special versions', 'keepSpecials') +
+        '<div class="fs-hint">A player search without a rarity can catch a TOTW/special under the normal price: it\u2019s kept unlisted and you get its real value.</div>' +
+      '</div>' +
       '<details class="fs-sec"><summary>Limits</summary><div class="fs-rows" style="margin-top:8px">' +
         row('🛑', 'Session buy cap', 'sessionBuyCap') +
         row('📅', 'Daily buy cap', 'dailyBuyCap') + row('⏱️', 'Run minutes (0=∞)', 'runMinutes') +
@@ -120,7 +128,7 @@
       '</div>' +
       '<div class="fs-rows" style="margin-top:12px">' +
         swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
-        swRow('🧹', 'Book &amp; clear sold while sniping', 'autoClearSold') +
+        segRow('🧹', 'Clear sold while sniping', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]]) +
         row('📦', 'List pack pulls worth at least', 'packMin') +
       '</div>';
   }
@@ -337,6 +345,7 @@
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
     if (tab === 'hub') {
       var hsw = panel.querySelectorAll('[data-sw]'); for (var h = 0; h < hsw.length; h++) hsw[h].className = 'fs-sw' + (cfg[hsw[h].getAttribute('data-sw')] ? ' on' : '');
+      var hsg = panel.querySelectorAll('[data-seg]'); for (h = 0; h < hsg.length; h++) hsg[h].className = 'fs-sg' + (Number(hsg[h].getAttribute('data-val')) === cfg[hsg[h].getAttribute('data-seg')] ? ' on' : '');
       renderHub($);
     }
     if (tab !== 'snipe') return;

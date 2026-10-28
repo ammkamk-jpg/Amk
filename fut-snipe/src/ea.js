@@ -9,7 +9,7 @@
     ['searchTransferMarket', 'search'].forEach(function (name) {
       if (typeof s.Item[name] !== 'function') return;
       var orig = s.Item[name].bind(s.Item);
-      s.Item[name] = function (criteria) { try { if (criteria && !criteria.__fromUs) { capturedCriteria = criteria; capturedPlain = plainCriteria(criteria); render(); } } catch (e) {} return orig.apply(null, arguments); };
+      s.Item[name] = function (criteria) { try { if (criteria && !criteria.__fromUs) { capturedCriteria = criteria; capturedPlain = plainCriteria(criteria); capturedName = readSearchName(); render(); } } catch (e) {} return orig.apply(null, arguments); };
     });
     s.Item.__futWrapped = true;
   }
@@ -40,15 +40,66 @@
   function expiresOf(it) { try { var a = it._auction || {}; if (a.expires != null) return a.expires; if (a.timeRemaining != null) return a.timeRemaining; var et = it.endTime || a.endTime; if (et) { var now = Date.now(); if (et > 1e12) return Math.round((et - now) / 1000); if (et > 1e9) return Math.round((et * 1000 - now) / 1000); } return null; } catch (e) { return null; } }
   function ratingOf(it) { try { var r = it.rating != null ? it.rating : (it._staticData && it._staticData.rating); return r > 0 ? r : null; } catch (e) { return null; } }
   function nameOf(it) { try { return (it._staticData && it._staticData.name) || it.name || (it.getStaticData && it.getStaticData().name) || null; } catch (e) { return null; } }
-  function searchLabel() { if (curName) return curName; var id = (capturedPlain && (capturedPlain.maskedDefId || capturedPlain.defId)) || stats.curDefId; return id ? ('player #' + id) : 'player'; }
+  // ---------- player name (instead of "player #231747") ----------
+  // 1) the name in the market search box when you searched, 2) EA's own static player data,
+  // 3) EA's item lookup by id (async), 4) the first search result (doSearch sets curName).
+  var capturedName = null;
+  function searchedDefId() { var c = capturedPlain || capturedFromUrl; return c ? (c.maskedDefId || null) : null; }
+  function readSearchName() {
+    try {
+      var el = document.querySelector('.ut-player-search-control input, .ut-player-search-control--input-container input, input.ut-text-input-control');
+      var v = el && el.value && el.value.trim(); return v && v.length > 1 && v.length < 40 ? v : null;
+    } catch (e) { return null; }
+  }
+  function staticName(defId) {
+    try {
+      var R = window.repositories && window.repositories.Item, d = R && R.getStaticDataByDefId && R.getStaticDataByDefId(defId);
+      if (d) return d.name || (d.lastName ? ((d.firstName ? d.firstName.charAt(0) + '. ' : '') + d.lastName) : null);
+    } catch (e) {}
+    return null;
+  }
+  function resolveName() {
+    var id = searchedDefId(); if (!id) return;
+    curName = curName || staticName(id) || capturedName;
+    if (curName || !svc().Item.requestItemByDefId) return;
+    try {
+      svc().Item.requestItemByDefId(id).observe(OBS, function (s, r) {
+        try { var d = r && (r.data || r.response) || {}, it = d.item || (d.items && d.items[0]) || d; var n = nameOf(it); if (n && !curName) { curName = n; render(); } } catch (e) {}
+      });
+    } catch (e) {}
+  }
+  function searchLabel() { if (curName) return curName; var id = searchedDefId() || stats.curDefId; return id ? ('player #' + id) : 'player'; }
   function sessionNet() { return (startCoins != null && coins() != null) ? coins() - startCoins : null; }
 
+  // EA's allowed price range per card. Read from (a) the item itself, (b) the requestMarketData
+  // response, or (c) any /pricelimits response the web app loads (see the XHR hook). Cached by
+  // item id and by card id; the last raw response shape goes into the diagnostics.
+  var limitsCache = {}, limitsDebug = null;
+  function readLimitsObj(o) {
+    if (!o) return null;
+    var mn = o.minimum != null ? o.minimum : o.minPrice != null ? o.minPrice : o.min, mx = o.maximum != null ? o.maximum : o.maxPrice != null ? o.maxPrice : o.max;
+    return mx > 0 ? { min: mn || 0, max: mx } : null;
+  }
+  function rememberLimits(list) {
+    (list || []).forEach(function (x) { var l = readLimitsObj(x); if (!l) return; if (x.itemId != null) limitsCache['i' + x.itemId] = l; if (x.defId != null) limitsCache['d' + x.defId] = l; });
+  }
+  function cachedLimits(item) { return limitsCache['i' + item.id] || limitsCache['d' + defIdOf(item)] || null; }
   function priceLimits(item) {
     return new Promise(function (res) {
+      var fromItem = function () { try { return (item.getPriceLimits && readLimitsObj(item.getPriceLimits())) || readLimitsObj(item._itemPriceLimits); } catch (e) { return null; } };
+      var have = cachedLimits(item) || fromItem(); if (have) return res(have);
       try {
-        if (item.hasPriceLimits && item.hasPriceLimits()) { var r0 = item.getPriceLimits && item.getPriceLimits(); return res(r0 && r0.maximum > 0 ? { min: r0.minimum, max: r0.maximum } : null); }
         if (!svc().Item.requestMarketData) return res(null);
-        svc().Item.requestMarketData(item).observe(OBS, function () { try { var r = item.getPriceLimits(); res(r && r.maximum > 0 ? { min: r.minimum, max: r.maximum } : null); } catch (e) { res(null); } });
+        var to = setTimeout(function () { res(cachedLimits(item) || fromItem()); }, 8000);
+        svc().Item.requestMarketData(item).observe(OBS, function (s, r) {
+          clearTimeout(to);
+          try {
+            var d = r && (r.data || r.response); limitsDebug = d ? Object.keys(d).slice(0, 12) : null;
+            if (d) rememberLimits(Array.isArray(d) ? d : (d.itemPriceLimits || d.priceLimits || d.items || [d]));
+          } catch (e) {}
+          var l = cachedLimits(item) || fromItem(); if (l) { limitsCache['i' + item.id] = l; limitsCache['d' + defIdOf(item)] = l; }
+          res(l);
+        });
       } catch (e) { res(null); }
     });
   }
@@ -81,7 +132,10 @@
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
-          if (items.length) { curName = nameOf(items[0].it) || curName; stats.curDefId = defIdOf(items[0].it) || stats.curDefId; }
+          if (items.length && !curName) { // name from a result of the searched card itself, not a special version of it
+            var base = searchedDefId(), own = items.filter(function (x) { return !base || String(defIdOf(x.it)) === String(base); })[0] || items[0];
+            curName = nameOf(own.it) || curName; stats.curDefId = defIdOf(own.it) || stats.curDefId;
+          }
           finish({ ok: true, items: items });
         });
       } catch (e) { clearTimeout(to); finish({ ok: false, items: [], err: { msg: 'search error: ' + e } }); }
@@ -120,8 +174,9 @@
         try { var u = String(self.__u || ''), get = (self.__m || 'GET').toUpperCase() === 'GET';
           if (/transfermarket\?/i.test(u) && get) {
             tmUrls.unshift(u); tmUrls = tmUrls.slice(0, 5);
-            if (!running) { var c = criteriaFromUrl(u); if (c) { capturedFromUrl = c; render(); } } // the bot's own searches don't count
+            if (!running) { var c = criteriaFromUrl(u); if (c) { capturedFromUrl = c; capturedName = readSearchName(); render(); } } // the bot's own searches don't count
           }
+          if (/pricelimits/i.test(u) && self.status === 200) { try { var pl = self.responseType === 'json' ? self.response : JSON.parse(self.responseText); rememberLimits(Array.isArray(pl) ? pl : (pl && (pl.itemPriceLimits || pl.priceLimits)) || []); } catch (e) {} }
           if (/transfermarket|\/trade/i.test(u) && self.status === 429) { var r = self.getResponseHeader && self.getResponseHeader('Retry-After'); requestStop('EA soft-ban (429)' + (r ? ', retry after ' + r + 's' : '') + ' — wait, then restart'); }
         } catch (e) {}
       });
