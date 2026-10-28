@@ -55,7 +55,7 @@
       var old = document.getElementById('fs-fx'); if (old) old.parentNode.removeChild(old);
       var fx = document.createElement('div'); fx.id = 'fs-fx';
       fx.innerHTML = '<div class="fx-flash"></div><div class="fx-ring"></div><div class="fx-ring r2"></div><div class="fx-ring r3"></div><canvas></canvas>' +
-        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + ' <span>+' + fmt(profit) + '</span></div></div>';
+        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + (profit != null ? ' <span>+' + fmt(profit) + '</span>' : '') + '</div></div>';
       document.body.appendChild(fx);
       var lock = document.getElementById('fs-lock'); if (lock) { lock.classList.remove('shake'); void lock.offsetWidth; lock.classList.add('shake'); }
       burst(fx.querySelector('canvas'));

@@ -2,7 +2,7 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
-## Status (v3.3.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
+## Status (v3.4.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
 - Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
 - v2.6.0: re-check slider 30-120, randomised gaps/breaks/re-checks, live feed (one line per search, clears after ~20 with a short pause), relists expired transfer-list cards via EA's Re-list all.
 - v2.7.0: real web-app diag showed cards are drawn on <canvas> with no player id in the DOM, but each `li.listFUTItem` row has a hidden `.ut-item-view--stats` row "AVG <coins>". Price tags now show that value on every card (Club too), no searches. Search-based club pricing and the per-id price cache were removed. ⚡ button is draggable (position saved). Diag now lists all `services` keys and Item methods (check for `relistExpiredAuctions` / `requestTransferItems`).
@@ -11,6 +11,7 @@ Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don'
 - v3.1.0: gaps base x (1.03 + 0.55 r^1.8) x tempo mood 1.0-1.2 (re-rolled every 8-25 searches) + 6% 1.5-6s pauses: Normal = 2.6-4.3s, median ~3.3s. Feed keeps 200 lines, scrollable (lock screen lets touchmove through inside .fs-feed), no auto-clear.
 - v3.2.0: Hub tab (hub.js): transfer list counts, real profit from a ledger (`futSnipe.ledger.v1`: bot buys + pack pulls at 0, sales booked once by item id, sale = _auction.currentBid), Book & clear sold (clearSoldItems), re-price expired before relisting (price check per card via withCard: maskedDefId=base, defId=[exact], matchId filter), list pack pulls worth >= packMin from requestUnassignedItems. Hub jobs run with mode='job' and the lock screen. During sniping hubPass() books sales, clears sold, re-prices up to 2 expired per pass.
 - v3.3.0: Hub redesigned like the user's Simple Trader screenshot (own style, no branding): Profit card (realized + unrealized from ledger.buys[].list, vs yesterday, sparkline), Activity (sessions, life.searches, avg profit/card), Safety assistant (pricing.js safetyStatus: searches today vs ~1800/day estimate, 6h pause after captcha/429 = life.lastBlock), trade list All/Bought/Sold with initials avatars.
+- v3.4.0: "After buy" = List (unchanged: price check + relist) / Transfer list (move, don't list) / Unassigned (leave). Keep modes skip the price check and use keepMax (required) + keepMin (optional, also sent as minBuy). Replaced the autoList switch.
 - Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
 - Not yet tested on the real EA web app (user was still on 2.4.1 when sending diag).
 - fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).

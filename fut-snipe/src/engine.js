@@ -17,9 +17,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow) {
+  async function search(maxBuy, slow, minBuy) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -81,8 +81,19 @@
     return true;
   }
 
+  // After a buy: List (price check + auto-relist, as always), or keep it: move it to the transfer
+  // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
+  // you set (keepMax, optional keepMin).
+  function keepMode() { return (cfg.afterBuy | 0) !== 0; }
+  async function afterBuy(item) {
+    if (!keepMode()) return relist(item);
+    if (cfg.afterBuy === 2) { feed(searchLabel() + ' left in Unassigned', 'list'); return; }
+    await sleep(rand(1200, 3000)); // still moves if you tap Stop meanwhile
+    var ok = await moveToTransfer(item);
+    feed(ok ? searchLabel() + ' moved to transfer list (not listed)' : 'Move to transfer list failed (full?) - card is in Unassigned', ok ? 'list' : 'stop');
+  }
+
   async function relist(item) {
-    if (!cfg.autoList) return;
     var sell = market.price; if (!(sell > 0)) return;
     await sleep(rand(1500, 4000)); // still lists if you tap Stop meanwhile: a bought card shouldn't sit unlisted
     var moved = await moveToTransfer(item);
@@ -95,20 +106,21 @@
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   async function snipeOnce() {
-    var r = await search(market.snipe); if (!r) return;
+    var keep = keepMode(), minB = keep ? cfg.keepMin : 0;
+    var r = await search(market.snipe, false, minB); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
-      var price = r.items[j].p; if (price > market.snipe) break;
+      var price = r.items[j].p; if (price > market.snipe) break; if (price < minB) continue;
       var bal = coins(); if (bal != null && price > bal) { feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
-        var e = profitAt(market.price, price);
+        var e = keep ? 0 : profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
-        await relist(r.items[j].it);
+        feed(searchLabel() + ' sniped for ' + fmt(price) + (keep ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep ? null : e); render();
+        await afterBuy(r.items[j].it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
@@ -121,7 +133,7 @@
       if (stats.buys >= cfg.sessionBuyCap) return requestStop('session cap reached (' + cfg.sessionBuyCap + ')');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
-      if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
+      if (!keepMode() && (!market.snipe || stats.sinceCheck >= nextCheckAt)) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
       else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
@@ -137,6 +149,15 @@
   function start() {
     if (!canStart()) return;
     if (!haveSearch()) { blockMsg = 'Search a player in the transfer market (or load a filter), then Start.'; render(); return; }
+    if (keepMode()) {
+      if (!(cfg.keepMax > 0)) { blockMsg = 'Transfer list / Unassigned mode: set "Buy at or below" first (no price check in this mode).'; render(); return; }
+      if (cfg.keepMin > cfg.keepMax) { blockMsg = 'Min price is higher than "Buy at or below".'; render(); return; }
+      market.snipe = floorStep(cfg.keepMax); running = true; phase = 'running';
+      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' and ≥ ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
+      say('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe));
+      render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
+      return;
+    }
     running = true; phase = 'checking';
     feed('Start ' + searchLabel() + ' · target +' + fmt(cfg.minProfit) + '/card', 'price');
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });

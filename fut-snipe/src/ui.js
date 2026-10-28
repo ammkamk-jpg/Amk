@@ -56,7 +56,11 @@
         segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
         swRow('📳', 'Vibrate on snipe', 'vibrate') +
         segRow('⏳', 'List for', 'listDur', LIST_DURS) +
-        swRow('🧾', 'Auto-relist after buy', 'autoList') +
+        segRow('🛒', 'After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]]) +
+        '<div id="fs-keep">' +
+          '<div class="fs-hint" style="padding-top:2px">Price check is off in this mode — you set the price:</div>' +
+          row('◎', 'Buy at or below', 'keepMax') + row('⬆︎', 'Min price (0 = off)', 'keepMin') +
+        '</div>' +
         swRow('♻️', 'Relist expired cards', 'relistExpired') +
         sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
         swRow('🏷️', 'Price tags on cards', 'badges') +
@@ -314,8 +318,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
-        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -343,11 +347,13 @@
     if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
 
     var pr = market.snipe ? profitAt(market.price, market.snipe) : null;
-    if ($('fs-hero-max')) $('fs-hero-max').textContent = market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
-    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
+    var keep = keepMode();
+    if ($('fs-keep')) $('fs-keep').style.display = keep ? '' : 'none';
+    if ($('fs-hero-max')) $('fs-hero-max').textContent = keep ? (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : 'Set price') : market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
+    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = keep ? ('your price · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list, not listed') + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '')) : market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
     // EA's price steps (50/100/250/500/1000) round the snipe point down, so the real profit at the
     // snipe point is usually a bit above the target: that's the minimum per card.
-    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
+    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = keep || pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
     if ($('fs-emin')) $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
     if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
     if ($('fs-cheap')) $('fs-cheap').textContent = stats.cheapest != null ? fmt(stats.cheapest) : '—';
@@ -363,6 +369,7 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = running
         ? '■ Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
+          : keepMode() ? '▶ Start<span class="sub">buys at ≤ ' + (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }

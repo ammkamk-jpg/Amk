@@ -27,11 +27,11 @@
   function applyFields(t, s) { for (var k in s) { if (k !== '__fromUs' && s[k] !== undefined && s[k] !== '') { try { t[k] = s[k]; } catch (e) {} } } return t; }
   // The user's search (player, rarity, ...) but with OUR prices: their own max-buy / min-buy /
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
-  function buildCriteria(maxBuy) {
+  function buildCriteria(maxBuy, minBuy) {
     var out;
     if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
     else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
-    try { out.minBuy = 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
+    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
@@ -63,12 +63,12 @@
     return { stop: false, msg: 'request failed (' + code + ')' };
   }
   // One market search. Returns {ok, items: [{it, p, secs}] sorted cheapest first}.
-  function doSearch(maxBuy) {
+  function doSearch(maxBuy, minBuy) {
     return new Promise(function (resolve) {
       var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
       var to = setTimeout(function () { finish({ ok: false, items: [], err: { msg: 'search timeout' } }); }, 15000);
       try { try { svc().Item.clearTransferMarketCache(); } catch (e) {}
-        svc().Item.searchTransferMarket(buildCriteria(maxBuy), 1).observe(OBS, function (sender, resp) {
+        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
           var raw = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
           var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || raw.length));

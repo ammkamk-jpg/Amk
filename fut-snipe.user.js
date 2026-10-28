@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.3.1
+// @version      3.4.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.3.1';
+  var VERSION = '3.4.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -161,7 +161,7 @@
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, repriceExpired: 1, autoClearSold: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, relistExpired: 1, repriceExpired: 1, autoClearSold: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
@@ -270,11 +270,11 @@
   function applyFields(t, s) { for (var k in s) { if (k !== '__fromUs' && s[k] !== undefined && s[k] !== '') { try { t[k] = s[k]; } catch (e) {} } } return t; }
   // The user's search (player, rarity, ...) but with OUR prices: their own max-buy / min-buy /
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
-  function buildCriteria(maxBuy) {
+  function buildCriteria(maxBuy, minBuy) {
     var out;
     if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
     else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
-    try { out.minBuy = 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
+    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
@@ -306,12 +306,12 @@
     return { stop: false, msg: 'request failed (' + code + ')' };
   }
   // One market search. Returns {ok, items: [{it, p, secs}] sorted cheapest first}.
-  function doSearch(maxBuy) {
+  function doSearch(maxBuy, minBuy) {
     return new Promise(function (resolve) {
       var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
       var to = setTimeout(function () { finish({ ok: false, items: [], err: { msg: 'search timeout' } }); }, 15000);
       try { try { svc().Item.clearTransferMarketCache(); } catch (e) {}
-        svc().Item.searchTransferMarket(buildCriteria(maxBuy), 1).observe(OBS, function (sender, resp) {
+        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
           var raw = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
           var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || raw.length));
@@ -391,9 +391,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow) {
+  async function search(maxBuy, slow, minBuy) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -455,8 +455,19 @@
     return true;
   }
 
+  // After a buy: List (price check + auto-relist, as always), or keep it: move it to the transfer
+  // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
+  // you set (keepMax, optional keepMin).
+  function keepMode() { return (cfg.afterBuy | 0) !== 0; }
+  async function afterBuy(item) {
+    if (!keepMode()) return relist(item);
+    if (cfg.afterBuy === 2) { feed(searchLabel() + ' left in Unassigned', 'list'); return; }
+    await sleep(rand(1200, 3000)); // still moves if you tap Stop meanwhile
+    var ok = await moveToTransfer(item);
+    feed(ok ? searchLabel() + ' moved to transfer list (not listed)' : 'Move to transfer list failed (full?) - card is in Unassigned', ok ? 'list' : 'stop');
+  }
+
   async function relist(item) {
-    if (!cfg.autoList) return;
     var sell = market.price; if (!(sell > 0)) return;
     await sleep(rand(1500, 4000)); // still lists if you tap Stop meanwhile: a bought card shouldn't sit unlisted
     var moved = await moveToTransfer(item);
@@ -469,20 +480,21 @@
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   async function snipeOnce() {
-    var r = await search(market.snipe); if (!r) return;
+    var keep = keepMode(), minB = keep ? cfg.keepMin : 0;
+    var r = await search(market.snipe, false, minB); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
-      var price = r.items[j].p; if (price > market.snipe) break;
+      var price = r.items[j].p; if (price > market.snipe) break; if (price < minB) continue;
       var bal = coins(); if (bal != null && price > bal) { feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
-        var e = profitAt(market.price, price);
+        var e = keep ? 0 : profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
-        await relist(r.items[j].it);
+        feed(searchLabel() + ' sniped for ' + fmt(price) + (keep ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep ? null : e); render();
+        await afterBuy(r.items[j].it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
@@ -495,7 +507,7 @@
       if (stats.buys >= cfg.sessionBuyCap) return requestStop('session cap reached (' + cfg.sessionBuyCap + ')');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
-      if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
+      if (!keepMode() && (!market.snipe || stats.sinceCheck >= nextCheckAt)) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
       else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
@@ -511,6 +523,15 @@
   function start() {
     if (!canStart()) return;
     if (!haveSearch()) { blockMsg = 'Search a player in the transfer market (or load a filter), then Start.'; render(); return; }
+    if (keepMode()) {
+      if (!(cfg.keepMax > 0)) { blockMsg = 'Transfer list / Unassigned mode: set "Buy at or below" first (no price check in this mode).'; render(); return; }
+      if (cfg.keepMin > cfg.keepMax) { blockMsg = 'Min price is higher than "Buy at or below".'; render(); return; }
+      market.snipe = floorStep(cfg.keepMax); running = true; phase = 'running';
+      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' and ≥ ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
+      say('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe));
+      render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
+      return;
+    }
     running = true; phase = 'checking';
     feed('Start ' + searchLabel() + ' · target +' + fmt(cfg.minProfit) + '/card', 'price');
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
@@ -803,7 +824,7 @@
       var old = document.getElementById('fs-fx'); if (old) old.parentNode.removeChild(old);
       var fx = document.createElement('div'); fx.id = 'fs-fx';
       fx.innerHTML = '<div class="fx-flash"></div><div class="fx-ring"></div><div class="fx-ring r2"></div><div class="fx-ring r3"></div><canvas></canvas>' +
-        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + ' <span>+' + fmt(profit) + '</span></div></div>';
+        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + (profit != null ? ' <span>+' + fmt(profit) + '</span>' : '') + '</div></div>';
       document.body.appendChild(fx);
       var lock = document.getElementById('fs-lock'); if (lock) { lock.classList.remove('shake'); void lock.offsetWidth; lock.classList.add('shake'); }
       burst(fx.querySelector('canvas'));
@@ -1039,7 +1060,11 @@
         segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
         swRow('📳', 'Vibrate on snipe', 'vibrate') +
         segRow('⏳', 'List for', 'listDur', LIST_DURS) +
-        swRow('🧾', 'Auto-relist after buy', 'autoList') +
+        segRow('🛒', 'After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]]) +
+        '<div id="fs-keep">' +
+          '<div class="fs-hint" style="padding-top:2px">Price check is off in this mode — you set the price:</div>' +
+          row('◎', 'Buy at or below', 'keepMax') + row('⬆︎', 'Min price (0 = off)', 'keepMin') +
+        '</div>' +
         swRow('♻️', 'Relist expired cards', 'relistExpired') +
         sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
         swRow('🏷️', 'Price tags on cards', 'badges') +
@@ -1297,8 +1322,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
-        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -1326,11 +1351,13 @@
     if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
 
     var pr = market.snipe ? profitAt(market.price, market.snipe) : null;
-    if ($('fs-hero-max')) $('fs-hero-max').textContent = market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
-    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
+    var keep = keepMode();
+    if ($('fs-keep')) $('fs-keep').style.display = keep ? '' : 'none';
+    if ($('fs-hero-max')) $('fs-hero-max').textContent = keep ? (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : 'Set price') : market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
+    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = keep ? ('your price · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list, not listed') + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '')) : market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
     // EA's price steps (50/100/250/500/1000) round the snipe point down, so the real profit at the
     // snipe point is usually a bit above the target: that's the minimum per card.
-    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
+    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = keep || pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
     if ($('fs-emin')) $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
     if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
     if ($('fs-cheap')) $('fs-cheap').textContent = stats.cheapest != null ? fmt(stats.cheapest) : '—';
@@ -1346,6 +1373,7 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = running
         ? '■ Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
+          : keepMode() ? '▶ Start<span class="sub">buys at ≤ ' + (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
