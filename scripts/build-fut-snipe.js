@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const VERSION = "3.1.0";
+const VERSION = "3.2.0";
 const raw = "https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/fut-snipe.user.js";
 
 const header = `// ==UserScript==
@@ -35,7 +35,7 @@ const header = `// ==UserScript==
 `;
 
 // Order matters only for code that runs at load time (settings, XHR hook, boot is last).
-const parts = ["pricing", "store", "state", "ea", "engine", "filters", "badges", "fx", "styles", "ui"];
+const parts = ["pricing", "store", "state", "ea", "engine", "hub", "filters", "badges", "fx", "styles", "ui"];
 const body = parts.map((p) => read(`fut-snipe/src/${p}.js`).replace(/\s+$/, "")).join("\n\n");
 
 const out = `${header}

@@ -87,6 +87,50 @@
     return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
       '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
   }
+  function hubView() {
+    return '' +
+      '<div class="fs-hero"><div class="l">Real profit · all time</div><div class="big" id="fs-h-real">—</div>' +
+        '<div class="sub" id="fs-h-today"></div><div class="prof" id="fs-h-sold"></div></div>' +
+      '<div class="fs-card"><div class="fs-ch">Transfer list <span id="fs-h-at" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
+        '<div class="c"><div class="l">Sold</div><div class="v g" id="fs-h-nsold">—</div></div>' +
+        '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
+        '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
+        '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
+      '</div></div>' +
+      '<button class="fs-btn fs-go" id="fs-h-refresh">↻ Refresh<span class="sub">reads your transfer list + unassigned items (no market searches)</span></button>' +
+      '<div class="fs-hubbtns">' +
+        '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-packs"><b>📦 List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
+      '</div>' +
+      '<div class="fs-rows" style="margin-top:12px">' +
+        swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
+        swRow('🧹', 'Book &amp; clear sold while sniping', 'autoClearSold') +
+        row('📦', 'List pack pulls worth at least', 'packMin') +
+      '</div>' +
+      '<div class="fs-ch" style="padding:4px 2px 8px">Recent sales</div><div id="fs-h-sales"></div>';
+  }
+  function renderHub($) {
+    var all = realProfit(0), today = realProfit(startOfToday());
+    if ($('fs-h-real')) $('fs-h-real').textContent = all.n ? signed(all.sum) : '—';
+    if ($('fs-h-today')) $('fs-h-today').textContent = 'today ' + (today.n ? signed(today.sum) : '—') + ' · ' + all.n + ' sale' + (all.n === 1 ? '' : 's') + ' with known cost';
+    if ($('fs-h-sold')) $('fs-h-sold').textContent = hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) + ' waiting to clear' : '';
+    if ($('fs-h-at')) $('fs-h-at').textContent = hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX + ' · ' + ago(hub.at) : '';
+    var n = function (v) { return hub.at ? String(v) : '—'; };
+    if ($('fs-h-nsold')) { $('fs-h-nsold').textContent = n(hub.sold); $('fs-h-nact').textContent = n(hub.active); $('fs-h-nexp').textContent = n(hub.expired); $('fs-h-nun').textContent = n(hub.unlisted); }
+    if ($('fs-h-clear-s')) $('fs-h-clear-s').textContent = hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first';
+    if ($('fs-h-exp-s')) $('fs-h-exp-s').textContent = hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first';
+    if ($('fs-h-packs-s')) $('fs-h-packs-s').textContent = hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned';
+    var rb = $('fs-h-refresh'); if (rb) rb.style.opacity = hub.busy === 'refresh' ? '.6' : '';
+    var sl = $('fs-h-sales');
+    if (sl) {
+      var html = ledger.sales.length ? ledger.sales.slice(0, 20).map(function (x) {
+        return '<div class="fs-sale"><div><div class="nm">' + esc(x.name) + (x.pack ? ' <span class="pk">pack</span>' : '') + '</div><div class="de">' + ago(x.t) + ' · ' + (x.buy != null ? fmt(x.buy) + ' → ' : 'sold ') + fmt(x.sold) + '</div></div>' +
+          '<div class="pf ' + (x.profit == null ? '' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div></div>';
+      }).join('') : '<div class="fs-empty">No sales booked yet.<br>Tap Refresh after cards sell.</div>';
+      if (sl.__html !== html) { sl.__html = html; sl.innerHTML = html; }
+    }
+  }
   function statsView() {
     var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
     var totEst = sessions.reduce(function (a, b) { return a + (b.est || 0); }, 0);
@@ -157,6 +201,7 @@
       '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tabs">' +
         '<div class="fs-tab" data-tab="snipe">Snipe</div>' +
+        '<div class="fs-tab" data-tab="hub">Hub</div>' +
         '<div class="fs-tab" data-tab="filters">Filters</div>' +
         '<div class="fs-tab" data-tab="stats">Stats</div>' +
       '</div><div id="fs-body"></div>';
@@ -201,6 +246,10 @@
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
         case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
         case 'fs-reset2': resetLife(); break;
+        case 'fs-h-refresh': hubRefreshButton(); break;
+        case 'fs-h-clear': hubClearButton(); break;
+        case 'fs-h-exp': if (running) stopAll(); else startJob('expired'); break;
+        case 'fs-h-packs': if (running) stopAll(); else startJob('packs'); break;
       }
     });
     render();
@@ -216,8 +265,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
-        if ($('fs-l-pf')) $('fs-l-pf').textContent = market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -231,8 +280,12 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
     // body (only rebuild on tab change to keep inputs usable)
     var body = $('fs-body');
-    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : snipeView(); fillFeeds(); }
+    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : tab === 'hub' ? hubView() : snipeView(); fillFeeds(); if (tab === 'hub' && !hub.at && !running) hubRefreshButton(); }
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
+    if (tab === 'hub') {
+      var hsw = panel.querySelectorAll('[data-sw]'); for (var h = 0; h < hsw.length; h++) hsw[h].className = 'fs-sw' + (cfg[hsw[h].getAttribute('data-sw')] ? ' on' : '');
+      renderHub($);
+    }
     if (tab !== 'snipe') return;
 
     // keep toggles / segments reflecting cfg (body isn't rebuilt on value changes)

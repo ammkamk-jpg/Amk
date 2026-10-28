@@ -2,7 +2,7 @@
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, repriceExpired: 1, autoClearSold: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
@@ -37,3 +37,14 @@
   var filters = lsGet(FILT_KEY, []);     // [{name, crit}]
   var sessions = lsGet(SESS_KEY, []);     // [{t, buys, spent, est, net}]
   try { localStorage.removeItem(PRICE_KEY); } catch (e) {} // old per-card price cache, no longer used
+
+  // Ledger for REAL profit: what each card cost (bot buys, pack pulls = 0) and every sale booked.
+  var LEDGER_KEY = 'futSnipe.ledger.v1';
+  var ledger = lsGet(LEDGER_KEY, { buys: {}, sales: [], booked: {} }); // buys: {itemId: {buy, t, name, pack}}
+  function saveLedger() {
+    var ids = Object.keys(ledger.buys);
+    if (ids.length > 400) ids.sort(function (a, b) { return ledger.buys[a].t - ledger.buys[b].t; }).slice(0, ids.length - 400).forEach(function (k) { delete ledger.buys[k]; });
+    var bk = Object.keys(ledger.booked); if (bk.length > 600) bk.slice(0, bk.length - 600).forEach(function (k) { delete ledger.booked[k]; });
+    ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
+  }
+  function noteBuy(id, buy, name, pack) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack }; saveLedger(); }

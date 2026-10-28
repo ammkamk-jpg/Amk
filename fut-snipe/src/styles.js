@@ -62,6 +62,14 @@
     '.fs-empty{text-align:center;color:' + C_MUT + ';font-size:13px;padding:34px 10px}' +
     '.fs-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:7px}.fs-bar i{display:block;height:100%;border-radius:999px;background:' + C_OK + '}' +
     '.fs-srow{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid ' + C_LINE + '}.fs-srow:last-child{border:0}' +
+    // hub
+    '.fs-cols.c4{grid-template-columns:repeat(4,1fr)}.fs-cols.c4 .c{padding:6px 10px 12px}' +
+    '.fs-hubbtns{display:flex;flex-direction:column;gap:8px;margin-top:10px}' +
+    '.fs-hb{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:13px 15px;color:' + C_TXT + ';font-family:' + FONT + ';transition:transform .12s}.fs-hb:active{transform:scale(.98)}' +
+    '.fs-hb b{font-size:14.5px;font-weight:850}.fs-hb span{font-size:11.5px;color:' + C_MUT + '}' +
+    '.fs-sale{display:flex;justify-content:space-between;align-items:center;gap:10px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:10px 14px;margin-bottom:7px}' +
+    '.fs-sale .nm{font-weight:800;font-size:13.5px}.fs-sale .de{font-size:11px;color:' + C_MUT + ';margin-top:1px}.fs-sale .pf{font-weight:900;font-size:15px;color:' + C_MUT + '}.fs-sale .pf.pos{color:' + C_OK + '}.fs-sale .pf.neg{color:' + C_WARN + '}' +
+    '.fs-sale .pk{font-size:9.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:1px 6px;vertical-align:2px}' +
     // floating button
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:50%;background:' + GRAD + ';color:#0b0f1a;font-size:25px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px -6px rgba(34,211,238,.6),0 0 0 3px rgba(255,255,255,.08);cursor:pointer;font-family:' + FONT + ';touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}' +
     '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.12);opacity:.92}' +

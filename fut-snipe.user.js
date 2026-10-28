@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.1.0
+// @version      3.2.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.1.0';
+  var VERSION = '3.2.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -120,6 +120,8 @@
     rnd = rnd || Math.random;
     return Math.max(1, Math.round(n * (1 - spread + 2 * spread * rnd())));
   }
+  // Special cards' ids are the base player id + k * 2^24; the market search wants the base id.
+  function baseIdOf(id) { id = Number(id); return id > 0 ? id % 16777216 : 0; }
   // "61.3K" -> 61300, "1.2M" -> 1200000, "7,750" -> 7750. null if it isn't a coin value.
   function parseCoins(t) {
     var m = String(t == null ? '' : t).replace(/[\s,]/g, '').match(/^(\d+(?:\.\d+)?)([kKmM]?)$/);
@@ -129,14 +131,14 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf };
   }
 
   // ---------- settings & storage ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, repriceExpired: 1, autoClearSold: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
@@ -172,10 +174,23 @@
   var sessions = lsGet(SESS_KEY, []);     // [{t, buys, spent, est, net}]
   try { localStorage.removeItem(PRICE_KEY); } catch (e) {} // old per-card price cache, no longer used
 
+  // Ledger for REAL profit: what each card cost (bot buys, pack pulls = 0) and every sale booked.
+  var LEDGER_KEY = 'futSnipe.ledger.v1';
+  var ledger = lsGet(LEDGER_KEY, { buys: {}, sales: [], booked: {} }); // buys: {itemId: {buy, t, name, pack}}
+  function saveLedger() {
+    var ids = Object.keys(ledger.buys);
+    if (ids.length > 400) ids.sort(function (a, b) { return ledger.buys[a].t - ledger.buys[b].t; }).slice(0, ids.length - 400).forEach(function (k) { delete ledger.buys[k]; });
+    var bk = Object.keys(ledger.booked); if (bk.length > 600) bk.slice(0, bk.length - 600).forEach(function (k) { delete ledger.booked[k]; });
+    ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
+  }
+  function noteBuy(id, buy, name, pack) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack }; saveLedger(); }
+
   // ---------- run state (resetRun() clears it on every Start) ----------
   var running = false, stopReason = '', blockMsg = '', phase = 'idle', startTs = 0, startCoins = null;
   var tab = 'snipe', lockHidden = false, curName = null, gotRange = false;
   var nextBreakAt = 30, nextCheckAt = 50;  // fuzzy thresholds, re-rolled each time
+  var mode = 'snipe';                      // 'snipe' = Start, 'job' = a Hub job (re-price expired, list pack pulls)
+  var searchBase = null, matchId = null;   // set while pricing one exact card (see withCard)
   var market = { price: null, fresh: false, snipe: 0, checkedAt: 0, probeMax: 0, probeCount: null };
   var stats = { searches: 0, buys: 0, sinceBreak: 0, sinceCheck: 0, spent: 0, est: 0, cheapest: null, eaMin: null, eaMax: null, curDefId: null };
   var OBS = {};
@@ -188,6 +203,7 @@
     stopReason = ''; blockMsg = ''; phase = 'idle'; lockHidden = false; gotRange = false; curName = null; lastBuy = '';
     market = { price: null, fresh: false, snipe: 0, checkedAt: 0, probeMax: 0, probeCount: null };
     stats = { searches: 0, buys: 0, sinceBreak: 0, sinceCheck: 0, spent: 0, est: 0, cheapest: null, eaMin: null, eaMax: null, curDefId: null };
+    mode = 'snipe'; searchBase = null; matchId = null;
     nextBreakAt = fuzzyCount(cfg.breakEvery, 0.25); nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
     startCoins = coins(); startTs = Date.now();
   }
@@ -223,8 +239,8 @@
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
   function buildCriteria(maxBuy) {
     var out;
-    if (capturedCriteria) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
-    else { var C = ctor(); var src = capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
+    if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
+    else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
     try { out.minBuy = 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
@@ -270,6 +286,7 @@
           var items = [];
           for (var i = 0; i < raw.length; i++) {
             var p = priceOf(raw[i]); if (!(p > 0)) continue;
+            if (matchId != null && String(defIdOf(raw[i])) !== String(matchId)) continue; // pricing one exact card version
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
@@ -293,6 +310,13 @@
   // Transfer list: expired (unsold) cards, and EA's own "Re-list all" (same price + duration as before).
   function isExpired(it) { try { var a = it._auction || {}; return a.tradeState === 'expired' || (it.getAuctionData && it.getAuctionData().isExpired && it.getAuctionData().isExpired()); } catch (e) { return false; } }
   function transferItems() { return new Promise(function (res) { try { if (!svc().Item.requestTransferItems) return res(null); svc().Item.requestTransferItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  function tradeStateOf(it) { try { return (it._auction && it._auction.tradeState) || (it.getAuctionData && it.getAuctionData().tradeState) || null; } catch (e) { return null; } }
+  function isSold(it) { return tradeStateOf(it) === 'closed'; }
+  function salePriceOf(it) { var a = (it && it._auction) || {}; return a.currentBid > 0 ? a.currentBid : (a.buyNowPrice > 0 ? a.buyNowPrice : 0); }
+  function isTradable(it) { try { if (typeof it.isTradeable === 'function') return !!it.isTradeable(); } catch (e) {} return it.tradable !== false && !(it.untradeableCount > 0); }
+  function isPlayer(it) { try { return it.type === 'player' || (typeof it.isPlayer === 'function' && it.isPlayer()); } catch (e) { return false; } }
+  function unassignedItems() { return new Promise(function (res) { try { if (!svc().Item.requestUnassignedItems) return res(null); svc().Item.requestUnassignedItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  function clearSold() { return new Promise(function (res) { try { if (!svc().Item.clearSoldItems) return res(false); svc().Item.clearSoldItems().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 
   // Remembers the user's market searches (URL) and stops the bot on a 429.
@@ -322,7 +346,7 @@
       sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
     }
   }
-  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^stopped/i.test(reason) ? 'S' + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
+  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^(stopped|done)/i.test(reason) ? reason.charAt(0).toUpperCase() + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
@@ -352,24 +376,23 @@
   }
 
   // Price of the current search: one search with NO max-buy, then lower/raise max-buy like a
-  // person would (start at the last known price or the cheapest listing seen, step ~12%, then
-  // halve the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
+  // person would (start at a known price, else the cheapest listing seen, step ~12%, then halve
+  // the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
   // Returns {price, fresh} or null (none listed / stopped).
-  async function findPrice() {
+  async function findPrice(start) {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
-    var probe = Math.min(top, market.price > 0 ? floorStep(market.price) : roundStep(r.items[0].p));
+    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(r.items[0].p));
     for (var tries = 0; probe && tries < 12 && running; tries++) {
       var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) { feed('Search failed (' + ((pr.err || {}).msg || '?') + ')', 'miss'); continue; }
       market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
       feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
-     
       if (v === 'few') { few = pr.items; break; }
       if (v === 'many') hiItems = pr.items;
       var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
@@ -385,7 +408,7 @@
   async function checkPrice() {
     phase = 'checking'; market.probeMax = 0; market.probeCount = null;
     say('Checking price for ' + searchLabel() + '…'); render();
-    var pick = await findPrice();
+    var pick = await findPrice(market.price);
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var sp = snipePoint(pick.price, cfg.minProfit);
@@ -398,19 +421,6 @@
     return true;
   }
 
-  // Expired (unsold) cards on the transfer list go back up at their old price + duration,
-  // via EA's own "Re-list all". Checked after each listing and every few minutes.
-  var lastExpiredCheck = 0;
-  async function maybeRelistExpired(force) {
-    if (!cfg.relistExpired || (!force && Date.now() - lastExpiredCheck < 180000)) return;
-    lastExpiredCheck = Date.now() - rand(0, 40000);
-    var items = await transferItems(); if (!items) return;
-    var n = items.filter(isExpired).length; if (!n) return;
-    await sleep(rand(800, 2000));
-    var ok = await relistAllExpired();
-    feed(ok ? 'Relisted ' + n + ' expired card' + (n > 1 ? 's' : '') + ' (same price + time)' : 'Re-list of expired cards failed - use Re-list all', ok ? 'list' : 'stop');
-  }
-
   async function relist(item) {
     if (!cfg.autoList) return;
     var sell = market.price; if (!(sell > 0)) return;
@@ -419,7 +429,7 @@
     await sleep(rand(600, 1200));
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
     feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
-    if (ok) await maybeRelistExpired(true);
+    if (ok) await hubPass(true);
   }
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
@@ -434,7 +444,7 @@
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var e = profitAt(market.price, price);
-        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price;
+        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel());
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
         feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
         await relist(r.items[j].it);
@@ -443,7 +453,6 @@
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
-   
   }
 
   async function runLoop() {
@@ -452,7 +461,7 @@
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
       if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
-      else { await snipeOnce(); stats.sinceCheck++; if (running) await maybeRelistExpired(false); }
+      else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
     }
@@ -475,6 +484,155 @@
   function stopAll() { requestStop('stopped by you'); }
   function resetLife() { life = { bought: 0, spent: 0, est: 0 }; saveLife(); render(); }
 
+  // ---------- Hub: transfer list overview, real profit, re-priced relisting, pack pulls ----------
+  var hub = { at: 0, total: 0, sold: 0, soldValue: 0, active: 0, expired: 0, unlisted: 0, packs: null, packsTradable: 0, busy: '' };
+  var TRADEPILE_MAX = 100;
+
+  function summarize(items) {
+    hub.at = Date.now(); hub.total = items.length; hub.sold = 0; hub.soldValue = 0; hub.active = 0; hub.expired = 0; hub.unlisted = 0;
+    items.forEach(function (it) {
+      var st = tradeStateOf(it);
+      if (st === 'closed') { hub.sold++; hub.soldValue += afterTax(salePriceOf(it)); }
+      else if (st === 'active') hub.active++;
+      else if (isExpired(it)) hub.expired++;
+      else hub.unlisted++;
+    });
+  }
+  // Book every sold card once: sale price after EA tax minus what it cost (bot buy, pack = 0).
+  // Cards the bot didn't buy have no known cost: the sale is booked, profit stays unknown.
+  function bookSales(items) {
+    var n = 0;
+    items.filter(isSold).forEach(function (it) {
+      var id = String(it.id); if (ledger.booked[id]) return;
+      var sold = salePriceOf(it); if (!(sold > 0)) return;
+      var b = ledger.buys[id], buy = b ? b.buy : null, profit = buy != null ? profitAt(sold, buy) : null, name = nameOf(it) || (b && b.name) || 'Card';
+      ledger.sales.unshift({ t: Date.now(), name: name, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
+      ledger.booked[id] = 1; delete ledger.buys[id]; n++;
+      feed(name + ' sold for ' + fmt(sold) + (profit != null ? ' · ' + signed(profit) : ''), 'hit');
+    });
+    if (n) saveLedger();
+    return n;
+  }
+  function realProfit(sinceMs) {
+    var sum = 0, n = 0;
+    ledger.sales.forEach(function (s) { if (s.t >= sinceMs && s.profit != null) { sum += s.profit; n++; } });
+    return { sum: sum, n: n };
+  }
+  function startOfToday() { var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+
+  // Read the transfer list (+ unassigned pile), book sales, optionally clear them. 1-2 requests.
+  async function refreshHub(withPacks) {
+    var items = await transferItems(); if (!items) { feed('Could not read the transfer list', 'miss'); return null; }
+    summarize(items); bookSales(items);
+    if (withPacks) { var un = await unassignedItems(); if (un) { hub.packs = un.length; hub.packsTradable = un.filter(function (it) { return isPlayer(it) && isTradable(it); }).length; } }
+    render();
+    return items;
+  }
+  async function clearSoldNow() {
+    if (!hub.sold) return;
+    await sleep(rand(700, 1600));
+    var ok = await clearSold();
+    feed(ok ? 'Cleared ' + hub.sold + ' sold card' + (hub.sold > 1 ? 's' : '') + ' · +' + fmt(hub.soldValue) + ' coins' : 'Clearing sold cards failed', ok ? 'list' : 'stop');
+    if (ok) { hub.total -= hub.sold; hub.sold = 0; hub.soldValue = 0; }
+  }
+
+  // Run fn while searches target exactly this card (base player id + exact version).
+  async function withCard(it, fn) {
+    var keep = { searchBase: searchBase, matchId: matchId, curName: curName, gotRange: gotRange };
+    var def = defIdOf(it);
+    // defId = [exact version], so cheaper versions of the same player don't crowd the 21 results.
+    searchBase = { type: 'player', maskedDefId: baseIdOf(def), defId: [Number(def)], count: 21 }; matchId = def; curName = nameOf(it) || curName; gotRange = true;
+    try { return await fn(); }
+    finally { searchBase = keep.searchBase; matchId = keep.matchId; curName = keep.curName; gotRange = keep.gotRange; }
+  }
+  async function listAt(it, price, why) {
+    var ok = await listItem(it, Math.max(MIN_PRICE, price - stepFor(price)), price, cfg.listDur || 3600);
+    feed(ok ? (nameOf(it) || 'Card') + ' listed for ' + fmt(price) + (why ? ' · ' + why : '') : 'Listing ' + (nameOf(it) || 'card') + ' failed', ok ? 'list' : 'stop');
+    return ok;
+  }
+
+  // Expired cards: price-check each one first and relist at today's price (or EA's "Re-list all"
+  // at the old price when re-pricing is off). max = cards per pass, so sniping isn't held up long.
+  async function relistExpired(items, max) {
+    var expired = items.filter(isExpired); if (!expired.length) return 0;
+    if (!cfg.repriceExpired) {
+      await sleep(rand(800, 2000));
+      var ok = await relistAllExpired();
+      feed(ok ? 'Relisted ' + expired.length + ' expired card' + (expired.length > 1 ? 's' : '') + ' (same price + time)' : 'Re-list of expired cards failed - use Re-list all', ok ? 'list' : 'stop');
+      return ok ? expired.length : 0;
+    }
+    var done = 0;
+    for (var i = 0; i < expired.length && i < max && running; i++) {
+      var it = expired[i], old = salePriceOf(it), name = nameOf(it) || 'Card';
+      setActivity('Re-pricing ' + name + '…');
+      var pick = isPlayer(it) ? await withCard(it, function () { return findPrice(old); }) : null;
+      if (!running) break;
+      var price = pick ? pick.price : old;
+      if (!(price > 0)) { feed(name + ' · no price found, left expired', 'miss'); continue; }
+      var b = ledger.buys[String(it.id)], why = pick ? (price < old ? 'was ' + fmt(old) : price > old ? 'up from ' + fmt(old) : 'same price') : 'old price';
+      if (b && !b.pack && profitAt(price, b.buy) < 0) why += ' · below what you paid';
+      await sleep(rand(600, 1400));
+      if (await listAt(it, price, why)) done++;
+    }
+    return done;
+  }
+
+  // During sniping: every few minutes (and after each listing) look at the transfer list.
+  var lastHubPass = 0;
+  async function hubPass(force) {
+    if (!force && Date.now() - lastHubPass < 180000) return;
+    lastHubPass = Date.now() - rand(0, 40000);
+    var items = await refreshHub(false); if (!items || !running) return;
+    if (cfg.autoClearSold) await clearSoldNow();
+    if (cfg.relistExpired && running) await relistExpired(items, 2);
+  }
+
+  // Pack pulls: price-check every tradeable player in the unassigned pile and list the ones worth
+  // at least packMin; the rest stay where they are for you to decide.
+  async function listPackPulls() {
+    var un = await unassignedItems(); if (!un) return 'could not read your unassigned items';
+    var cands = un.filter(function (it) { return isPlayer(it) && isTradable(it); });
+    if (!cands.length) return 'no tradeable players in your unassigned items';
+    var tp = await transferItems(), room = TRADEPILE_MAX - (tp ? tp.length : 0);
+    if (room <= 0) return 'transfer list is full (' + TRADEPILE_MAX + ')';
+    var listed = 0, kept = 0;
+    for (var i = 0; i < cands.length && i < 12 && running; i++) {
+      var it = cands[i], name = nameOf(it) || 'Card';
+      setActivity('Pricing pack pull ' + (i + 1) + ' of ' + Math.min(cands.length, 12) + ': ' + name);
+      var pick = await withCard(it, function () { return findPrice(0); }); if (!running) break;
+      if (!pick) { feed(name + ' · not on the market, kept', 'miss'); kept++; continue; }
+      if (pick.price < cfg.packMin) { feed(name + ' ≈ ' + fmt(pick.price) + ' · under ' + fmt(cfg.packMin) + ', kept', 'miss'); kept++; continue; }
+      if (listed >= room) { feed('Transfer list full - stopped listing', 'stop'); break; }
+      await sleep(rand(800, 1800));
+      if (!(await moveToTransfer(it))) { feed(name + ' · could not move to transfer list', 'stop'); continue; }
+      await sleep(rand(600, 1300));
+      if (await listAt(it, pick.price, 'pack pull')) { noteBuy(it.id, 0, name, true); listed++; }
+    }
+    return 'pack pulls: ' + listed + ' listed, ' + kept + ' kept';
+  }
+
+  // Hub buttons that need searches run like a short sniping run (lock screen, Stop works).
+  function startJob(kind) {
+    if (!canStart()) return;
+    running = true; mode = 'job'; phase = 'job';
+    var job = kind === 'packs' ? listPackPulls() : refreshHub(false).then(function (items) {
+      if (!items) return 'could not read the transfer list';
+      return relistExpired(items, 30).then(function (n) { return 'relisted ' + n + ' expired card' + (n === 1 ? '' : 's'); });
+    });
+    feed(kind === 'packs' ? 'Listing pack pulls…' : 'Re-pricing expired cards…', 'check'); render();
+    job.then(function (msg) { if (running) requestStop('Done: ' + msg); refreshHub(true); }).catch(function (e) { requestStop('hub error: ' + e); });
+  }
+  async function hubRefreshButton() {
+    if (running || hub.busy) return;
+    hub.busy = 'refresh'; render();
+    try { await refreshHub(true); } finally { hub.busy = ''; render(); }
+  }
+  async function hubClearButton() {
+    if (running || hub.busy) return;
+    hub.busy = 'clear'; render();
+    try { if (await refreshHub(false)) await clearSoldNow(); } finally { hub.busy = ''; render(); }
+  }
+
   // ---------- Live Filters + diagnostics ----------
   function saveCurrentFilter() {
     var crit = capturedPlain || capturedFromUrl; if (!crit) { blockMsg = 'Search a player once first, then save it as a filter.'; render(); return; }
@@ -491,7 +649,7 @@
     var rows = document.querySelectorAll(ROW_SEL), withAvg = 0;
     for (var i = 0; i < rows.length; i++) if (parseCoins(avgLabelOf(rows[i])) > 0) withAvg++;
     var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls };
-    var text = 'FUT Snipe diagnostics\n' + JSON.stringify(d, null, 2);
+    var text = 'TangaTolga Sniper diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
     render();
@@ -704,6 +862,14 @@
     '.fs-empty{text-align:center;color:' + C_MUT + ';font-size:13px;padding:34px 10px}' +
     '.fs-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:7px}.fs-bar i{display:block;height:100%;border-radius:999px;background:' + C_OK + '}' +
     '.fs-srow{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid ' + C_LINE + '}.fs-srow:last-child{border:0}' +
+    // hub
+    '.fs-cols.c4{grid-template-columns:repeat(4,1fr)}.fs-cols.c4 .c{padding:6px 10px 12px}' +
+    '.fs-hubbtns{display:flex;flex-direction:column;gap:8px;margin-top:10px}' +
+    '.fs-hb{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:13px 15px;color:' + C_TXT + ';font-family:' + FONT + ';transition:transform .12s}.fs-hb:active{transform:scale(.98)}' +
+    '.fs-hb b{font-size:14.5px;font-weight:850}.fs-hb span{font-size:11.5px;color:' + C_MUT + '}' +
+    '.fs-sale{display:flex;justify-content:space-between;align-items:center;gap:10px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:10px 14px;margin-bottom:7px}' +
+    '.fs-sale .nm{font-weight:800;font-size:13.5px}.fs-sale .de{font-size:11px;color:' + C_MUT + ';margin-top:1px}.fs-sale .pf{font-weight:900;font-size:15px;color:' + C_MUT + '}.fs-sale .pf.pos{color:' + C_OK + '}.fs-sale .pf.neg{color:' + C_WARN + '}' +
+    '.fs-sale .pk{font-size:9.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:1px 6px;vertical-align:2px}' +
     // floating button
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:50%;background:' + GRAD + ';color:#0b0f1a;font-size:25px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px -6px rgba(34,211,238,.6),0 0 0 3px rgba(255,255,255,.08);cursor:pointer;font-family:' + FONT + ';touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}' +
     '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.12);opacity:.92}' +
@@ -841,6 +1007,50 @@
     return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
       '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
   }
+  function hubView() {
+    return '' +
+      '<div class="fs-hero"><div class="l">Real profit · all time</div><div class="big" id="fs-h-real">—</div>' +
+        '<div class="sub" id="fs-h-today"></div><div class="prof" id="fs-h-sold"></div></div>' +
+      '<div class="fs-card"><div class="fs-ch">Transfer list <span id="fs-h-at" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
+        '<div class="c"><div class="l">Sold</div><div class="v g" id="fs-h-nsold">—</div></div>' +
+        '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
+        '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
+        '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
+      '</div></div>' +
+      '<button class="fs-btn fs-go" id="fs-h-refresh">↻ Refresh<span class="sub">reads your transfer list + unassigned items (no market searches)</span></button>' +
+      '<div class="fs-hubbtns">' +
+        '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-packs"><b>📦 List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
+      '</div>' +
+      '<div class="fs-rows" style="margin-top:12px">' +
+        swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
+        swRow('🧹', 'Book &amp; clear sold while sniping', 'autoClearSold') +
+        row('📦', 'List pack pulls worth at least', 'packMin') +
+      '</div>' +
+      '<div class="fs-ch" style="padding:4px 2px 8px">Recent sales</div><div id="fs-h-sales"></div>';
+  }
+  function renderHub($) {
+    var all = realProfit(0), today = realProfit(startOfToday());
+    if ($('fs-h-real')) $('fs-h-real').textContent = all.n ? signed(all.sum) : '—';
+    if ($('fs-h-today')) $('fs-h-today').textContent = 'today ' + (today.n ? signed(today.sum) : '—') + ' · ' + all.n + ' sale' + (all.n === 1 ? '' : 's') + ' with known cost';
+    if ($('fs-h-sold')) $('fs-h-sold').textContent = hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) + ' waiting to clear' : '';
+    if ($('fs-h-at')) $('fs-h-at').textContent = hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX + ' · ' + ago(hub.at) : '';
+    var n = function (v) { return hub.at ? String(v) : '—'; };
+    if ($('fs-h-nsold')) { $('fs-h-nsold').textContent = n(hub.sold); $('fs-h-nact').textContent = n(hub.active); $('fs-h-nexp').textContent = n(hub.expired); $('fs-h-nun').textContent = n(hub.unlisted); }
+    if ($('fs-h-clear-s')) $('fs-h-clear-s').textContent = hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first';
+    if ($('fs-h-exp-s')) $('fs-h-exp-s').textContent = hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first';
+    if ($('fs-h-packs-s')) $('fs-h-packs-s').textContent = hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned';
+    var rb = $('fs-h-refresh'); if (rb) rb.style.opacity = hub.busy === 'refresh' ? '.6' : '';
+    var sl = $('fs-h-sales');
+    if (sl) {
+      var html = ledger.sales.length ? ledger.sales.slice(0, 20).map(function (x) {
+        return '<div class="fs-sale"><div><div class="nm">' + esc(x.name) + (x.pack ? ' <span class="pk">pack</span>' : '') + '</div><div class="de">' + ago(x.t) + ' · ' + (x.buy != null ? fmt(x.buy) + ' → ' : 'sold ') + fmt(x.sold) + '</div></div>' +
+          '<div class="pf ' + (x.profit == null ? '' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div></div>';
+      }).join('') : '<div class="fs-empty">No sales booked yet.<br>Tap Refresh after cards sell.</div>';
+      if (sl.__html !== html) { sl.__html = html; sl.innerHTML = html; }
+    }
+  }
   function statsView() {
     var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
     var totEst = sessions.reduce(function (a, b) { return a + (b.est || 0); }, 0);
@@ -911,6 +1121,7 @@
       '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tabs">' +
         '<div class="fs-tab" data-tab="snipe">Snipe</div>' +
+        '<div class="fs-tab" data-tab="hub">Hub</div>' +
         '<div class="fs-tab" data-tab="filters">Filters</div>' +
         '<div class="fs-tab" data-tab="stats">Stats</div>' +
       '</div><div id="fs-body"></div>';
@@ -955,6 +1166,10 @@
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
         case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
         case 'fs-reset2': resetLife(); break;
+        case 'fs-h-refresh': hubRefreshButton(); break;
+        case 'fs-h-clear': hubClearButton(); break;
+        case 'fs-h-exp': if (running) stopAll(); else startJob('expired'); break;
+        case 'fs-h-packs': if (running) stopAll(); else startJob('packs'); break;
       }
     });
     render();
@@ -970,8 +1185,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
-        if ($('fs-l-pf')) $('fs-l-pf').textContent = market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -985,8 +1200,12 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
     // body (only rebuild on tab change to keep inputs usable)
     var body = $('fs-body');
-    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : snipeView(); fillFeeds(); }
+    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : tab === 'hub' ? hubView() : snipeView(); fillFeeds(); if (tab === 'hub' && !hub.at && !running) hubRefreshButton(); }
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
+    if (tab === 'hub') {
+      var hsw = panel.querySelectorAll('[data-sw]'); for (var h = 0; h < hsw.length; h++) hsw[h].className = 'fs-sw' + (cfg[hsw[h].getAttribute('data-sw')] ? ' on' : '');
+      renderHub($);
+    }
     if (tab !== 'snipe') return;
 
     // keep toggles / segments reflecting cfg (body isn't rebuilt on value changes)

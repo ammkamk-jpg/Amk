@@ -6,7 +6,7 @@
       sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
     }
   }
-  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^stopped/i.test(reason) ? 'S' + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
+  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^(stopped|done)/i.test(reason) ? reason.charAt(0).toUpperCase() + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
@@ -36,24 +36,23 @@
   }
 
   // Price of the current search: one search with NO max-buy, then lower/raise max-buy like a
-  // person would (start at the last known price or the cheapest listing seen, step ~12%, then
-  // halve the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
+  // person would (start at a known price, else the cheapest listing seen, step ~12%, then halve
+  // the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
   // Returns {price, fresh} or null (none listed / stopped).
-  async function findPrice() {
+  async function findPrice(start) {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
-    var probe = Math.min(top, market.price > 0 ? floorStep(market.price) : roundStep(r.items[0].p));
+    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(r.items[0].p));
     for (var tries = 0; probe && tries < 12 && running; tries++) {
       var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) { feed('Search failed (' + ((pr.err || {}).msg || '?') + ')', 'miss'); continue; }
       market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
       feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
-     
       if (v === 'few') { few = pr.items; break; }
       if (v === 'many') hiItems = pr.items;
       var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
@@ -69,7 +68,7 @@
   async function checkPrice() {
     phase = 'checking'; market.probeMax = 0; market.probeCount = null;
     say('Checking price for ' + searchLabel() + '…'); render();
-    var pick = await findPrice();
+    var pick = await findPrice(market.price);
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var sp = snipePoint(pick.price, cfg.minProfit);
@@ -82,19 +81,6 @@
     return true;
   }
 
-  // Expired (unsold) cards on the transfer list go back up at their old price + duration,
-  // via EA's own "Re-list all". Checked after each listing and every few minutes.
-  var lastExpiredCheck = 0;
-  async function maybeRelistExpired(force) {
-    if (!cfg.relistExpired || (!force && Date.now() - lastExpiredCheck < 180000)) return;
-    lastExpiredCheck = Date.now() - rand(0, 40000);
-    var items = await transferItems(); if (!items) return;
-    var n = items.filter(isExpired).length; if (!n) return;
-    await sleep(rand(800, 2000));
-    var ok = await relistAllExpired();
-    feed(ok ? 'Relisted ' + n + ' expired card' + (n > 1 ? 's' : '') + ' (same price + time)' : 'Re-list of expired cards failed - use Re-list all', ok ? 'list' : 'stop');
-  }
-
   async function relist(item) {
     if (!cfg.autoList) return;
     var sell = market.price; if (!(sell > 0)) return;
@@ -103,7 +89,7 @@
     await sleep(rand(600, 1200));
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
     feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
-    if (ok) await maybeRelistExpired(true);
+    if (ok) await hubPass(true);
   }
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
@@ -118,7 +104,7 @@
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var e = profitAt(market.price, price);
-        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price;
+        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel());
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
         feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
         await relist(r.items[j].it);
@@ -127,7 +113,6 @@
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
-   
   }
 
   async function runLoop() {
@@ -136,7 +121,7 @@
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
       if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
-      else { await snipeOnce(); stats.sinceCheck++; if (running) await maybeRelistExpired(false); }
+      else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
     }
