@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      2.8.0
+// @version      2.8.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -25,7 +25,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '2.8.0';
+  var VERSION = '2.8.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -303,7 +303,7 @@
       sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
     }
   }
-  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); say('STOP: ' + reason); feed(reason, 'stop', true); render(); }
+  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^stopped/i.test(reason) ? 'S' + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
@@ -314,7 +314,7 @@
     if (!(await pace(slow))) return null;
     var r = await doSearch(maxBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++;
-    if (!r.ok) { if ((r.err || {}).stop) { requestStop(r.err.msg); return null; } log('search: ' + ((r.err || {}).msg || '—')); }
+    if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
     return r;
   }
@@ -331,7 +331,7 @@
     if (!running || stats.sinceBreak < nextBreakAt) return;
     stats.sinceBreak = 0; nextBreakAt = fuzzyCount(cfg.breakEvery, 0.25);
     var base = Math.max(5, cfg.breakSec) * 1000, br = rand(Math.round(base * 0.8), Math.round(base * 1.2));
-    var back = phase; phase = 'break'; say('break ' + Math.round(br / 1000) + 's'); feed('Break ' + Math.round(br / 1000) + 's', 'break', true); render();
+    var back = phase; phase = 'break'; say('On a break (' + Math.round(br / 1000) + 's)…'); feed('Break ' + Math.round(br / 1000) + 's', 'break'); render();
     await wait(br);
     if (running) phase = back; render();
   }
@@ -350,7 +350,7 @@
     var probe = Math.min(top, market.price > 0 ? floorStep(market.price) : roundStep(r.items[0].p));
     for (var tries = 0; probe && tries < 12 && running; tries++) {
       var pr = await search(probe, true); if (!pr) return null;
-      if (!pr.ok) continue;
+      if (!pr.ok) { feed('Search failed (' + ((pr.err || {}).msg || '?') + ')', 'miss'); continue; }
       market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
       feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
@@ -372,13 +372,13 @@
     say('Checking price for ' + searchLabel() + '…'); render();
     var pick = await findPrice();
     if (!running) return false;
-    if (!pick) { say('Checking price: ' + searchLabel() + ' - none found'); return false; }
+    if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var sp = snipePoint(pick.price, cfg.minProfit);
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(pick.price) + ' card'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    say('Price ' + searchLabel() + ': ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh listings)') + ' -> snipe <= ' + fmt(sp) + ', list ' + fmt(pick.price) + ', +' + fmt(profitAt(pick.price, sp)) + '/card');
-    feed('Price ' + fmt(pick.price) + ' → snipe ≤ ' + fmt(sp), 'price', true);
+    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(pick.price, sp)), 'price');
+    say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
     phase = 'running'; render();
     return true;
   }
@@ -393,8 +393,7 @@
     var n = items.filter(isExpired).length; if (!n) return;
     await sleep(rand(800, 2000));
     var ok = await relistAllExpired();
-    say(ok ? ('Relisted ' + n + ' expired card' + (n > 1 ? 's' : '') + ' (same price + time)') : 'relisting expired cards failed - use Re-list all');
-    feed(ok ? 'Relisted ' + n + ' expired' : 'Re-list of expired failed', ok ? 'list' : 'stop', true);
+    feed(ok ? 'Relisted ' + n + ' expired card' + (n > 1 ? 's' : '') + ' (same price + time)' : 'Re-list of expired cards failed - use Re-list all', ok ? 'list' : 'stop');
   }
 
   async function relist(item) {
@@ -404,28 +403,27 @@
     var moved = await moveToTransfer(item);
     await sleep(rand(600, 1200));
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
-    say(ok ? (searchLabel() + ' listed for ' + fmt(sell) + ' (' + durLabel(cfg.listDur) + ')') : ('relist failed' + (moved ? '' : ' (move failed)') + ' - list it by hand'));
-    feed(ok ? 'Listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed', ok ? 'list' : 'stop', true);
+    feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
     if (ok) await maybeRelistExpired(true);
   }
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   async function snipeOnce() {
     var r = await search(market.snipe); if (!r) return;
-    if (!r.ok) { feed(searchLabel() + ' · search failed', 'miss'); return afterFeedLine(); }
+    if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return afterFeedLine(); }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
       var price = r.items[j].p; if (price > market.snipe) break;
-      var bal = coins(); if (bal != null && price > bal) { log('not enough coins for ' + fmt(price)); continue; }
+      var bal = coins(); if (bal != null && price > bal) { feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var e = profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price;
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        say(searchLabel() + ' sniped for ' + fmt(price) + ' (est +' + fmt(e) + ')'); feed(searchLabel() + ' sniped for ' + fmt(price), 'hit', true); render();
+        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); render();
         await relist(r.items[j].it);
-      } else { lastBuy = (b.err && b.err.msg) || 'failed'; log('buy ' + fmt(price) + ': ' + lastBuy); feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
+      } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
@@ -438,7 +436,7 @@
       if (stats.buys >= cfg.sessionBuyCap) return requestStop('session cap reached (' + cfg.sessionBuyCap + ')');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
-      if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) log('re-checking the price (the market moves)…'); await checkPrice(); }
+      if (!market.snipe || stats.sinceCheck >= nextCheckAt) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
       else { await snipeOnce(); stats.sinceCheck++; if (running) await maybeRelistExpired(false); }
       render();
       await maybeBreak();
@@ -455,7 +453,7 @@
     if (!canStart()) return;
     if (!haveSearch()) { blockMsg = 'Search a player in the transfer market (or load a filter), then Start.'; render(); return; }
     running = true; phase = 'checking';
-    say('Start: ' + searchLabel() + ', target +' + fmt(cfg.minProfit) + '/card');
+    feed('Start ' + searchLabel() + ' · target +' + fmt(cfg.minProfit) + '/card', 'price');
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
 
@@ -622,19 +620,19 @@
   // ---------- UI ----------
   var logLines = [], activity = '';
   function log(m) { logLines.unshift(new Date().toLocaleTimeString() + '  ' + m); logLines = logLines.slice(0, 30); var b = document.getElementById('fs-log'); if (b) b.textContent = logLines.join('\n'); }
-  // A step worth seeing: on screen (activity line + log) and in the console.
-  function say(m) { log(m); setActivity(m); try { console.log('[FUT Snipe] ' + m); } catch (e) {} }
+  // What the bot is doing right now (status line only; events go to the feed, see feed()).
+  function say(m) { setActivity(m); }
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
   // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Clears itself
   // after ~20 lines (the bot pauses briefly meanwhile, see afterFeedLine).
   var feedLines = [], feedLimit = 20, feedClearing = false;
   function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
   function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
-  // quiet = already written to the console by say().
-  function feed(text, kind, quiet) {
+  // Every event, once: a line in the feed and the same line in the console.
+  function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
     feedLines.unshift(l);
-    if (!quiet) try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
+    try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
     for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
   }

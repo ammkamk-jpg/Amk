@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const VERSION = "2.8.0";
+const VERSION = "2.8.1";
 
 const header = `// ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)

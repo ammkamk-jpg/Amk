@@ -1,19 +1,19 @@
   // ---------- UI ----------
   var logLines = [], activity = '';
   function log(m) { logLines.unshift(new Date().toLocaleTimeString() + '  ' + m); logLines = logLines.slice(0, 30); var b = document.getElementById('fs-log'); if (b) b.textContent = logLines.join('\n'); }
-  // A step worth seeing: on screen (activity line + log) and in the console.
-  function say(m) { log(m); setActivity(m); try { console.log('[FUT Snipe] ' + m); } catch (e) {} }
+  // What the bot is doing right now (status line only; events go to the feed, see feed()).
+  function say(m) { setActivity(m); }
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
   // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Clears itself
   // after ~20 lines (the bot pauses briefly meanwhile, see afterFeedLine).
   var feedLines = [], feedLimit = 20, feedClearing = false;
   function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
   function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
-  // quiet = already written to the console by say().
-  function feed(text, kind, quiet) {
+  // Every event, once: a line in the feed and the same line in the console.
+  function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
     feedLines.unshift(l);
-    if (!quiet) try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
+    try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
     for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
   }
