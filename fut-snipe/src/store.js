@@ -2,7 +2,7 @@
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };

@@ -51,7 +51,8 @@ test("binary search finds the few-listings price in few searches", () => {
 
 test("a few stale listings mean: look higher", () => {
   assert.equal(P.probeVerdict([{ price: 9000, secs: 400 }]), "none");
-  assert.equal(P.probeVerdict([{ price: 9000, secs: 400 }, { price: 14750, secs: 3400 }]), "few");
+  assert.equal(P.probeVerdict([{ price: 9000, secs: 400 }, { price: 14750, secs: 3400 }]), "none", "one fresh isn't enough");
+  assert.equal(P.probeVerdict([{ price: 9000, secs: 400 }, { price: 14750, secs: 3400 }, { price: 15000, secs: 3500 }]), "few");
   assert.equal(P.probeVerdict([]), "none");
 });
 
@@ -123,5 +124,5 @@ test("price check: re-check from the last price is quick", () => {
 test("price check: a stale cheap outlier is stepped over", () => {
   const market = [{ price: 9000, secs: 400 }].concat(Array.from({ length: 30 }, (_, i) => ({ price: 14750 + i * 250, secs: 3400 })));
   const r = runCheck(market, 9000);
-  assert.ok(r.price >= 14750 && r.price <= 15250, JSON.stringify(r));
+  assert.equal(r.price, 15000, JSON.stringify(r)); // 2nd-cheapest fresh
 });

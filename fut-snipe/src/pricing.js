@@ -50,11 +50,13 @@
     return { lo: lo, hi: hi, next: next };
   }
   // What one probe result means: 'many' (go down), 'few' (found it) or 'none' (go up).
-  // A few listings that are all old (no fresh drop) are stale outliers, so they count as none.
+  // 'few' needs 2+ fresh listings, so the price can be the 2nd-cheapest fresh one; a few old
+  // (stale) listings, or a single fresh one, mean: look a bit higher.
   function probeVerdict(listings) {
     if (listings.length > FEW) return 'many';
-    for (var i = 0; i < listings.length; i++) if (isFreshSecs(listings[i].secs)) return 'few';
-    return 'none';
+    var fresh = 0;
+    for (var i = 0; i < listings.length; i++) if (isFreshSecs(listings[i].secs)) fresh++;
+    return fresh >= 2 ? 'few' : 'none';
   }
 
   // ---------- human-like randomness ----------

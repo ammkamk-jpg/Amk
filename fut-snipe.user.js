@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         FUT Snipe (Userscripts / iOS Safari)
-// @namespace    local.fut.snipe
-// @version      2.8.1
+// @name         TangaTolga Sniper
+// @namespace    local.tangatolga.sniper
+// @version      3.0.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -10,6 +10,8 @@
 // @inject-into  page
 // @grant        none
 // @noframes
+// @downloadURL  https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/fut-snipe.user.js
+// @updateURL    https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/fut-snipe.user.js
 // ==/UserScript==
 
 /*
@@ -23,9 +25,22 @@
 
 (function () {
   'use strict';
-  if (window.__futSnipeLoaded) return;
-  window.__futSnipeLoaded = true;
-  var VERSION = '2.8.1';
+  if (window.__tangaTolgaLoaded) return;
+  window.__tangaTolgaLoaded = true;
+  // An old "FUT Snipe" install got here first: say so instead of fighting it for the screen.
+  if (window.__futSnipeLoaded) {
+    var warn = function () {
+      var w = document.createElement('div');
+      w.style.cssText = 'position:fixed;left:12px;right:12px;top:max(12px,env(safe-area-inset-top));z-index:2147483647;padding:14px 16px;border-radius:16px;background:#1f1020;border:1px solid #fb7185;color:#fff;font:700 14px/1.4 -apple-system,system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+      w.textContent = 'TangaTolga Sniper: an old "FUT Snipe" is also installed and is running instead. Open the Userscripts app, delete "FUT Snipe", then reload this page.';
+      w.onclick = function () { w.remove(); };
+      document.body.appendChild(w);
+    };
+    if (document.body) warn(); else document.addEventListener('DOMContentLoaded', warn);
+    return;
+  }
+  window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
+  var VERSION = '3.0.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -79,11 +94,13 @@
     return { lo: lo, hi: hi, next: next };
   }
   // What one probe result means: 'many' (go down), 'few' (found it) or 'none' (go up).
-  // A few listings that are all old (no fresh drop) are stale outliers, so they count as none.
+  // 'few' needs 2+ fresh listings, so the price can be the 2nd-cheapest fresh one; a few old
+  // (stale) listings, or a single fresh one, mean: look a bit higher.
   function probeVerdict(listings) {
     if (listings.length > FEW) return 'many';
-    for (var i = 0; i < listings.length; i++) if (isFreshSecs(listings[i].secs)) return 'few';
-    return 'none';
+    var fresh = 0;
+    for (var i = 0; i < listings.length; i++) if (isFreshSecs(listings[i].secs)) fresh++;
+    return fresh >= 2 ? 'few' : 'none';
   }
 
   // ---------- human-like randomness ----------
@@ -117,7 +134,7 @@
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, autoList: 1, relistExpired: 1, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
@@ -421,7 +438,7 @@
         var e = profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price;
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); render();
+        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
         await relist(r.items[j].it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
@@ -536,86 +553,208 @@
     if (badgeObs) { try { badgeObs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {} }
   }
 
+  // ---------- snipe celebration: animation, vibration, sound ----------
+  // Sounds are synthesised with WebAudio (no files). iOS only allows audio after a tap, so the
+  // audio context is unlocked when you tap Start (or a sound button in settings).
+  var SOUNDS = [['Off', 0], ['Coins', 1], ['Arcade', 2], ['Boom', 3]];
+  var audioCtx = null;
+  function unlockAudio() {
+    try {
+      if (!audioCtx) { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; audioCtx = new AC(); }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var b = audioCtx.createBuffer(1, 1, 22050), s = audioCtx.createBufferSource(); s.buffer = b; s.connect(audioCtx.destination); s.start(0);
+    } catch (e) {}
+  }
+  function tone(type, f0, f1, t0, dur, vol) {
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime + t0;
+    o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function noise(t0, dur, vol) {
+    var n = Math.floor(audioCtx.sampleRate * dur), b = audioCtx.createBuffer(1, n, audioCtx.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    var s = audioCtx.createBufferSource(), g = audioCtx.createGain(), f = audioCtx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 900; g.gain.value = vol; s.buffer = b;
+    s.connect(f); f.connect(g); g.connect(audioCtx.destination); s.start(audioCtx.currentTime + t0);
+  }
+  function playSound(kind) {
+    if (!kind || !audioCtx) return;
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (kind === 1) { tone('square', 988, 988, 0, 0.09, 0.12); tone('square', 1319, 1319, 0.08, 0.42, 0.12); tone('triangle', 2637, 2637, 0.16, 0.25, 0.05); }
+      else if (kind === 2) { [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone('square', f, f, i * 0.07, 0.12, 0.09); }); tone('sawtooth', 1047, 2093, 0.36, 0.35, 0.06); }
+      else if (kind === 3) { tone('sine', 150, 38, 0, 0.7, 0.55); noise(0, 0.45, 0.35); tone('triangle', 1568, 1568, 0.12, 0.6, 0.08); tone('triangle', 2093, 2093, 0.22, 0.6, 0.06); }
+    } catch (e) {}
+  }
+
+  // Vibration: Android has navigator.vibrate. iPhone Safari doesn't, but tapping an iOS 18
+  // "switch" checkbox gives a haptic tick, so we tap a hidden one a few times.
+  var hapticEl = null;
+  function vibrate() {
+    try { if (navigator.vibrate && navigator.vibrate([70, 50, 140, 50, 220])) return; } catch (e) {}
+    try {
+      if (!hapticEl) {
+        hapticEl = document.createElement('label'); hapticEl.style.cssText = 'position:fixed;left:-99px;top:0;opacity:0;pointer-events:none';
+        hapticEl.innerHTML = '<input type="checkbox" switch>'; document.body.appendChild(hapticEl);
+      }
+      [0, 120, 240].forEach(function (d) { setTimeout(function () { try { hapticEl.click(); } catch (e) {} }, d); });
+    } catch (e) {}
+  }
+
+  // The over-the-top part: flash, shockwaves, "SNIPED!", a burst of coins + confetti, screen shake.
+  function celebrate(name, price, profit) {
+    if (cfg.vibrate) vibrate();
+    playSound(cfg.sound | 0);
+    try {
+      var old = document.getElementById('fs-fx'); if (old) old.parentNode.removeChild(old);
+      var fx = document.createElement('div'); fx.id = 'fs-fx';
+      fx.innerHTML = '<div class="fx-flash"></div><div class="fx-ring"></div><div class="fx-ring r2"></div><div class="fx-ring r3"></div><canvas></canvas>' +
+        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + ' <span>+' + fmt(profit) + '</span></div></div>';
+      document.body.appendChild(fx);
+      var lock = document.getElementById('fs-lock'); if (lock) { lock.classList.remove('shake'); void lock.offsetWidth; lock.classList.add('shake'); }
+      burst(fx.querySelector('canvas'));
+      setTimeout(function () { fx.classList.add('out'); }, 2300);
+      setTimeout(function () { if (fx.parentNode) fx.parentNode.removeChild(fx); }, 2900);
+    } catch (e) {}
+  }
+  function burst(cv) {
+    var w = window.innerWidth, h = window.innerHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = w * dpr; cv.height = h * dpr; var c = cv.getContext('2d'); c.scale(dpr, dpr);
+    var cols = ['#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#fde68a'], parts = [];
+    for (var i = 0; i < 150; i++) {
+      var a = Math.random() * Math.PI * 2, sp = 4 + Math.random() * 11, coin = i % 3 === 0;
+      parts.push({ x: w / 2, y: h * 0.42, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 5, r: coin ? 5 + Math.random() * 4 : 3 + Math.random() * 4,
+        rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, coin: coin, col: cols[i % cols.length] });
+    }
+    var t0 = Date.now();
+    (function frame() {
+      var t = Date.now() - t0; if (t > 2700) return;
+      c.clearRect(0, 0, w, h);
+      parts.forEach(function (p) {
+        p.vy += 0.32; p.vx *= 0.985; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.globalAlpha = Math.max(0, 1 - t / 2700);
+        if (p.coin) { c.scale(Math.abs(Math.cos(p.rot * 2)) + 0.15, 1); c.fillStyle = '#fbbf24'; c.beginPath(); c.arc(0, 0, p.r, 0, 7); c.fill(); c.fillStyle = '#fde68a'; c.beginPath(); c.arc(-p.r * 0.25, -p.r * 0.25, p.r * 0.45, 0, 7); c.fill(); }
+        else { c.fillStyle = p.col; c.fillRect(-p.r, -p.r / 2.5, p.r * 2, p.r / 1.25); }
+        c.restore();
+      });
+      requestAnimationFrame(frame);
+    })();
+  }
+
   // ---------- styles ----------
+  // Look: deep night background, frosted-glass cards, a cyan -> violet accent gradient, green for money.
+  var C_BG = '#06080d', C_GLASS = 'rgba(255,255,255,.045)', C_LINE = 'rgba(255,255,255,.08)', C_TXT = '#eef2f8', C_MUT = '#8b95a8';
+  var C_A1 = '#22d3ee', C_A2 = '#a78bfa', C_OK = '#34d399', C_WARN = '#fb923c', GRAD = 'linear-gradient(135deg,' + C_A1 + ',' + C_A2 + ')';
+  var FONT = '-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,Roboto,sans-serif';
   var CSS =
-    '#fs-panel *,#fs-fab,#fs-fab *{box-sizing:border-box}#fs-body{overflow-x:hidden}' +
-    '#fs-lock{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(7,11,18,.975);color:#eaf0f6;font:14px/1.45 -apple-system,system-ui,sans-serif;text-align:center;padding:24px;touch-action:none;-webkit-user-select:none;user-select:none}' +
-    '#fs-lock.show{display:flex}' +
-    '#fs-lock .spin{width:56px;height:56px;border-radius:50%;border:4px solid #1b2838;border-top-color:#00CAF6;animation:fsspin 1s linear infinite}' +
-    '@keyframes fsspin{to{transform:rotate(360deg)}}' +
-    '#fs-lock .lbig{font-size:21px;font-weight:800}#fs-lock .lstat{font-size:14px;color:#00CAF6;font-weight:700;min-height:18px}' +
-    '#fs-lock .lrow{display:flex;gap:26px;margin-top:2px}#fs-lock .lrow div{font-size:11px;color:#8ea0b5;text-transform:uppercase;letter-spacing:.4px}#fs-lock .lrow b{display:block;font-size:22px;color:#fff;font-weight:800;margin-top:2px}' +
-    '#fs-lock .lsub{font-size:12px;color:#7f93a8;max-width:300px}' +
-    '#fs-lock .lbtns{display:flex;gap:10px;margin-top:8px}#fs-lock .lbtns button{border:0;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:800}' +
-    '#fs-lstop{background:#FF5D0B;color:#fff}#fs-lhide{background:#1b2838;color:#cdd8e4}' +
-    '.fs-r.rcol{flex-direction:column;align-items:stretch;gap:8px}.fs-r.rcol .lab{justify-content:flex-start;width:100%}.fs-r.rcol .sv{margin-left:auto;color:#00CAF6;font-weight:800}' +
-    '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:4px;background:#2a3a4c;outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#00CAF6;border:3px solid #0b1017;box-shadow:0 1px 4px rgba(0,0,0,.4)}' +
-    '.fs-hint{font-size:11px;color:#8ea0b5;padding:0 12px 10px;margin-top:-4px}' +
-    '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:30px;background:#00CAF6;color:#05222c;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer;font-family:-apple-system,system-ui,sans-serif}' +
-    '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}' +
-    '#fs-fab{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}#fs-fab.drag{transform:scale(1.12);box-shadow:0 12px 30px rgba(0,0,0,.6);opacity:.92}' +
-    '#fs-fab .dot{position:absolute;top:8px;right:8px;width:12px;height:12px;border-radius:6px;background:#19e67d;border:2px solid #05222c;display:none}' +
-    '#fs-fab.run .dot{display:block}' +
-    '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:1px 9px;border-radius:9px;background:#0b1620;border:1.5px solid #00CAF6;color:#eaf6ff;font:800 12px/1.35 -apple-system,system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.45);pointer-events:none}' +
-    '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0b1017}' +
-    '#fs-panel.open{display:flex}' +
-    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;padding-top:max(13px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
-    '#fs-head .t{font-weight:800;letter-spacing:.3px;font-size:17px}#fs-head .v{opacity:.5;font-size:11px;margin-left:6px}' +
-    '#fs-head .coins{font-size:14px;font-weight:700;color:#f3c969;background:#1b2838;border-radius:10px;padding:7px 12px}' +
-    '#fs-min{background:#1b2838;color:#cdd8e4;border:0;border-radius:10px;width:38px;height:38px;font-size:19px;margin-left:10px}' +
-    '#fs-tabs{display:flex;gap:6px;padding:10px 14px 0;background:#101722}' +
-    '.fs-tab{flex:1;text-align:center;padding:10px;border-radius:10px 10px 0 0;background:#0e1620;color:#8ea0b5;font-weight:700;font-size:13px}' +
-    '.fs-tab.on{background:#0b1017;color:#00CAF6;box-shadow:inset 0 -2px 0 #00CAF6}' +
-    '#fs-body{flex:1;overflow:auto;padding:14px;padding-bottom:max(24px,env(safe-area-inset-bottom));width:100%;max-width:520px;margin:0 auto}' +
-    '.fs-hero{background:linear-gradient(135deg,#0f2630,#121c28);border:1px solid #1d4350;border-radius:16px;padding:16px;margin-bottom:12px;text-align:center}' +
-    '.fs-hero .big{font-size:34px;font-weight:900;color:#00CAF6;letter-spacing:.5px}' +
-    '.fs-hero .sub{font-size:12px;color:#8ea0b5;margin-top:2px}' +
-    '.fs-hero .prof{font-size:15px;font-weight:800;margin-top:8px}' +
-    '.fs-card{background:#121c28;border:1px solid #223041;border-radius:14px;overflow:hidden;margin-bottom:11px}' +
-    '.fs-ch{font-size:9.5px;letter-spacing:.6px;color:#6f8498;text-transform:uppercase;padding:9px 12px 0}' +
+    '#fs-panel *,#fs-fab,#fs-fab *,#fs-lock *,#fs-fx *{box-sizing:border-box}#fs-body{overflow-x:hidden}' +
+    // panel
+    '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 ' + FONT + ';color:' + C_TXT + ';background:radial-gradient(120% 60% at 100% 0%,rgba(167,139,250,.16),transparent 60%),radial-gradient(90% 50% at 0% 10%,rgba(34,211,238,.13),transparent 60%),' + C_BG + '}' +
+    '#fs-panel.open{display:flex;animation:fsfade .25s ease-out}@keyframes fsfade{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}' +
+    '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;padding-top:max(14px,env(safe-area-inset-top))}' +
+    '#fs-head .t{font-weight:900;font-size:21px;letter-spacing:-.3px;background:' + GRAD + ';-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    '#fs-head .t2{font-size:10px;font-weight:800;letter-spacing:3px;color:' + C_MUT + ';margin-left:7px}#fs-head .v{font-size:10px;color:#5d6678;margin-left:6px}' +
+    '#fs-head .coins{font-size:13px;font-weight:800;color:#fde68a;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:999px;padding:7px 12px}' +
+    '#fs-min{background:' + C_GLASS + ';color:' + C_TXT + ';border:1px solid ' + C_LINE + ';border-radius:999px;width:36px;height:36px;font-size:15px;margin-left:8px}' +
+    '#fs-tabs{display:flex;gap:4px;margin:4px 16px 0;padding:4px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px}' +
+    '.fs-tab{flex:1;text-align:center;padding:8px;border-radius:10px;color:' + C_MUT + ';font-weight:700;font-size:13px;transition:.2s}' +
+    '.fs-tab.on{background:rgba(255,255,255,.09);color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3)}' +
+    '#fs-body{flex:1;overflow:auto;padding:14px 16px;padding-bottom:max(28px,env(safe-area-inset-bottom));width:100%;max-width:520px;margin:0 auto}' +
+    // hero
+    '.fs-hero{position:relative;overflow:hidden;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:22px;padding:18px 16px;margin-bottom:12px;text-align:center}' +
+    '.fs-hero:before{content:"";position:absolute;inset:-1px;border-radius:22px;padding:1px;background:' + GRAD + ';-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.55;pointer-events:none}' +
+    '.fs-hero .l{font-size:10px;letter-spacing:2px;color:' + C_MUT + ';text-transform:uppercase;font-weight:700}' +
+    '.fs-hero .big{font-size:42px;font-weight:900;letter-spacing:-1px;line-height:1.1;margin-top:4px;background:' + GRAD + ';-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    '.fs-hero .sub{font-size:12px;color:' + C_MUT + ';margin-top:4px}' +
+    '.fs-hero .prof{display:inline-block;margin-top:10px;font-size:13px;font-weight:800;color:' + C_OK + ';background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);border-radius:999px;padding:5px 12px}.fs-hero .prof:empty{display:none}' +
+    // cards / stats
+    '.fs-card{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;overflow:hidden;margin-bottom:12px}' +
+    '.fs-ch{font-size:10px;letter-spacing:1.6px;color:' + C_MUT + ';text-transform:uppercase;font-weight:700;padding:11px 14px 0}' +
     '.fs-cols{display:grid;grid-template-columns:1fr 1fr 1fr}' +
-    '.fs-cols .c{padding:7px 10px 11px;border-right:1px solid #1b2836}.fs-cols .c:last-child{border-right:0}' +
-    '.fs-cols .l{font-size:9px;letter-spacing:.4px;color:#6f8498;text-transform:uppercase}' +
-    '.fs-cols .v{font-size:16px;font-weight:800;margin-top:3px}.fs-cols .v.c{color:#00CAF6}.fs-cols .v.g{color:#19e67d}.fs-cols .v.r{color:#ff8a5c}' +
-    '.fs-life{font-size:11px;color:#7f93a8;text-align:center;padding:0 0 9px;margin-top:-2px}' +
-    '.fs-rows{background:#141f2c;border:1px solid #223041;border-radius:14px;margin-bottom:11px;overflow:hidden}' +
-    '.fs-r{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1b2836}.fs-r:last-child{border-bottom:0}' +
-    '.fs-r .lab{display:flex;align-items:center;gap:9px;color:#cdd8e4}.fs-r .ic{width:17px;text-align:center;opacity:.85}' +
-    '.fs-r input[type=number]{width:92px;background:#0c131b;border:1px solid #223041;color:#eaf0f6;border-radius:8px;padding:7px 8px;font-size:13px;text-align:right}' +
-    '.fs-sw{width:44px;height:26px;border-radius:14px;background:#2a3a4c;position:relative;transition:.15s}.fs-sw.on{background:#00CAF6}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}.fs-sw.on:after{left:21px}' +
-    '.fs-segw{display:flex;gap:4px}.fs-sg{background:#0c131b;color:#9fb0c3;border:1px solid #223041;border-radius:8px;padding:6px 9px;font-size:12px;font-weight:600}.fs-sg.on{background:#00CAF6;color:#05222c;border-color:#00CAF6}' +
-    '.fs-btn{width:100%;border:0;border-radius:13px;padding:15px;font-size:16px;font-weight:800;letter-spacing:.2px}' +
-    '.fs-go{background:#00CAF6;color:#05222c}.fs-stop{background:#FF5D0B;color:#fff}' +
-    '.fs-btn .sub{display:block;font-size:11px;font-weight:600;opacity:.8;margin-top:2px}' +
-    '.fs-mini{display:flex;gap:8px;margin-top:9px}.fs-mini button{flex:1;background:#1b2838;color:#9fb0c3;border:0;border-radius:10px;padding:9px;font-size:12px;font-weight:600}' +
-    '#fs-block{color:#ff9a6b;font-size:11.5px;margin:0 0 10px}' +
-    '#fs-status{font-size:12px;color:#8ea0b5;margin:10px 2px 0;text-align:center}' +
-    '#fs-log{margin:8px 0 0;max-height:104px;overflow:auto;white-space:pre-wrap;color:#7f93a8;font-size:11px;line-height:1.5}' +
-    '.fs-sec summary{cursor:pointer;color:#8ea0b5;font-size:12px;padding:4px 2px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"⚙︎ ";opacity:.7}' +
-    '.fs-item{display:flex;align-items:center;justify-content:space-between;background:#121c28;border:1px solid #223041;border-radius:12px;padding:12px;margin-bottom:9px}' +
-    '.fs-item .nm{font-weight:700;font-size:14px}.fs-item .de{font-size:11px;color:#7f93a8;margin-top:2px}' +
-    '.fs-item .act{display:flex;gap:7px}.fs-item .act button{border:0;border-radius:9px;padding:9px 13px;font-size:12px;font-weight:700}' +
-    '.fs-load{background:#00CAF6;color:#05222c}.fs-del{background:#2a3a4c;color:#cdd8e4}' +
-    '.fs-empty{text-align:center;color:#6f8498;font-size:13px;padding:30px 10px}' +
-    '.fs-bar{height:7px;border-radius:4px;background:#1b2836;overflow:hidden;margin-top:6px}.fs-bar i{display:block;height:100%;background:#19e67d}' +
-    '.fs-srow{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-bottom:1px solid #1b2836}.fs-srow:last-child{border:0}' +
-    '.fs-segw{flex-wrap:wrap;justify-content:flex-end;max-width:62%}' +
-    '.fs-go .sub,.fs-stop .sub{display:block}#fs-act{font-size:12.5px;color:#00CAF6;font-weight:700;text-align:center;margin:10px 2px 0;min-height:17px}' +
-    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:38vh;overflow:hidden;text-align:left;margin-top:4px}' +
+    '.fs-cols .c{padding:6px 14px 12px;border-right:1px solid ' + C_LINE + '}.fs-cols .c:last-child{border-right:0}' +
+    '.fs-cols .l{font-size:9.5px;letter-spacing:1px;color:' + C_MUT + ';text-transform:uppercase}' +
+    '.fs-cols .v{font-size:18px;font-weight:850;margin-top:2px;font-variant-numeric:tabular-nums}.fs-cols .v.c{color:' + C_A1 + '}.fs-cols .v.g{color:' + C_OK + '}.fs-cols .v.r{color:' + C_WARN + '}' +
+    '.fs-life{font-size:11px;color:#6b7487;text-align:center;padding:0 0 11px}' +
+    // settings rows
+    '.fs-rows{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;margin-bottom:12px;overflow:hidden}' +
+    '.fs-r{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;border-bottom:1px solid ' + C_LINE + '}.fs-r:last-child{border-bottom:0}' +
+    '.fs-r .lab{display:flex;align-items:center;gap:10px;color:#dbe2ee;font-size:13.5px}.fs-r .ic{width:18px;text-align:center}' +
+    '.fs-r.rcol{flex-direction:column;align-items:stretch;gap:9px}.fs-r.rcol .lab{width:100%}.fs-r.rcol .sv{margin-left:auto;color:' + C_A1 + ';font-weight:800}' +
+    '.fs-r input[type=number]{width:96px;background:rgba(0,0,0,.35);border:1px solid ' + C_LINE + ';color:' + C_TXT + ';border-radius:10px;padding:8px 10px;font-size:14px;font-weight:700;text-align:right}' +
+    '.fs-sw{width:46px;height:28px;flex:none;border-radius:999px;background:rgba(255,255,255,.14);position:relative;transition:.2s}.fs-sw.on{background:' + GRAD + '}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:.2s cubic-bezier(.3,1.4,.5,1)}.fs-sw.on:after{left:21px}' +
+    '.fs-segw{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:64%}.fs-sg{background:rgba(0,0,0,.3);color:#b3bccb;border:1px solid ' + C_LINE + ';border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700;transition:.15s}.fs-sg.on{background:' + GRAD + ';color:#0b0f1a;border-color:transparent}' +
+    '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:999px;background:rgba(255,255,255,.12);outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#fff;border:0;box-shadow:0 0 0 4px rgba(34,211,238,.35),0 2px 6px rgba(0,0,0,.4)}' +
+    '.fs-hint{font-size:11px;color:' + C_MUT + ';padding:0 14px 10px;margin-top:-4px}' +
+    // buttons
+    '.fs-btn{position:relative;overflow:hidden;width:100%;border:0;border-radius:18px;padding:16px;font-size:17px;font-weight:900;letter-spacing:.3px;transition:transform .12s}.fs-btn:active{transform:scale(.97)}' +
+    '.fs-go{background:' + GRAD + ';color:#0b0f1a;box-shadow:0 10px 30px -8px rgba(34,211,238,.55)}' +
+    '.fs-go:after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);animation:fssheen 3.2s ease-in-out infinite}@keyframes fssheen{0%,55%{left:-60%}100%{left:130%}}' +
+    '.fs-stop{background:linear-gradient(135deg,#fb7185,#fb923c);color:#fff;box-shadow:0 10px 30px -8px rgba(251,113,133,.55)}' +
+    '.fs-btn .sub{display:block;font-size:11px;font-weight:650;opacity:.75;margin-top:3px;letter-spacing:0}' +
+    '.fs-mini{display:flex;gap:8px;margin-top:10px}.fs-mini button{flex:1;background:' + C_GLASS + ';color:#b3bccb;border:1px solid ' + C_LINE + ';border-radius:12px;padding:10px;font-size:12px;font-weight:700}' +
+    '#fs-block{color:' + C_WARN + ';font-size:12px;margin:0 0 10px}#fs-block:empty{display:none}' +
+    '#fs-status{font-size:12px;color:' + C_MUT + ';margin:12px 2px 0;text-align:center}' +
+    '#fs-log{margin:8px 0 0;max-height:90px;overflow:auto;white-space:pre-wrap;color:#6b7487;font-size:11px;line-height:1.5}#fs-log:empty{display:none}' +
+    '.fs-sec{margin-top:4px}.fs-sec summary{cursor:pointer;color:' + C_MUT + ';font-size:12px;font-weight:700;padding:8px 4px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"›";display:inline-block;margin-right:7px;transition:.2s}.fs-sec[open] summary:before{transform:rotate(90deg)}' +
+    '#fs-act{font-size:13px;color:' + C_A1 + ';font-weight:800;text-align:center;margin:12px 2px 0;min-height:18px}' +
+    // filters / stats tabs
+    '.fs-item{display:flex;align-items:center;justify-content:space-between;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:13px 14px;margin-bottom:9px}' +
+    '.fs-item .nm{font-weight:800;font-size:14px}.fs-item .de{font-size:11px;color:' + C_MUT + ';margin-top:2px}' +
+    '.fs-item .act{display:flex;gap:7px}.fs-item .act button{border:0;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800}' +
+    '.fs-load{background:' + GRAD + ';color:#0b0f1a}.fs-del{background:rgba(255,255,255,.1);color:' + C_TXT + '}' +
+    '.fs-empty{text-align:center;color:' + C_MUT + ';font-size:13px;padding:34px 10px}' +
+    '.fs-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:7px}.fs-bar i{display:block;height:100%;border-radius:999px;background:' + C_OK + '}' +
+    '.fs-srow{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid ' + C_LINE + '}.fs-srow:last-child{border:0}' +
+    // floating button
+    '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:50%;background:' + GRAD + ';color:#0b0f1a;font-size:25px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px -6px rgba(34,211,238,.6),0 0 0 3px rgba(255,255,255,.08);cursor:pointer;font-family:' + FONT + ';touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}' +
+    '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.12);opacity:.92}' +
+    '#fs-fab .dot{position:absolute;top:6px;right:6px;width:13px;height:13px;border-radius:50%;background:' + C_OK + ';border:2px solid #0b0f1a;display:none;animation:fsping2 1.4s infinite}#fs-fab.run .dot{display:block}' +
+    '@keyframes fsping2{0%{box-shadow:0 0 0 0 rgba(52,211,153,.7)}100%{box-shadow:0 0 0 10px rgba(52,211,153,0)}}' +
+    // price tag on cards
+    '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:2px 9px;border-radius:999px;background:rgba(6,8,13,.88);border:1.5px solid transparent;background-image:linear-gradient(rgba(6,8,13,.92),rgba(6,8,13,.92)),' + GRAD + ';background-origin:border-box;background-clip:padding-box,border-box;color:#fff;font:800 12px/1.35 ' + FONT + ';white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.5);pointer-events:none}' +
+    // running screen
+    '#fs-lock{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(80% 50% at 50% 30%,rgba(34,211,238,.12),transparent 70%),rgba(6,8,13,.97);color:' + C_TXT + ';font:14px/1.45 ' + FONT + ';text-align:center;padding:24px;padding-top:max(24px,env(safe-area-inset-top));touch-action:none;-webkit-user-select:none;user-select:none}' +
+    '#fs-lock.show{display:flex}#fs-lock.shake{animation:fsshake .5s cubic-bezier(.36,.07,.19,.97)}' +
+    '@keyframes fsshake{10%,90%{transform:translate(-2px,1px)}20%,80%{transform:translate(4px,-2px)}30%,50%,70%{transform:translate(-7px,3px)}40%,60%{transform:translate(7px,-3px)}}' +
+    '#fs-lock .radar{position:relative;width:96px;height:96px;border-radius:50%;border:1px solid rgba(34,211,238,.35);background:radial-gradient(circle,rgba(34,211,238,.18) 0 2px,transparent 3px),repeating-radial-gradient(circle,transparent 0 15px,rgba(34,211,238,.12) 16px 17px)}' +
+    '#fs-lock .radar:before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,rgba(34,211,238,.55),transparent 28%);animation:fsspin 1.8s linear infinite}' +
+    '#fs-lock .radar:after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(167,139,250,.35);animation:fsping3 2.4s ease-out infinite}' +
+    '@keyframes fsspin{to{transform:rotate(360deg)}}@keyframes fsping3{from{transform:scale(.9);opacity:1}to{transform:scale(1.35);opacity:0}}' +
+    '#fs-lock .lbig{font-size:22px;font-weight:900;letter-spacing:-.3px}#fs-lock .lbig b{background:' + GRAD + ';-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    '#fs-lock .lstat{font-size:14px;color:' + C_A1 + ';font-weight:800;min-height:18px}' +
+    '#fs-lock .lrow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%;max-width:380px}#fs-lock .lrow div{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:8px 4px;font-size:9.5px;color:' + C_MUT + ';text-transform:uppercase;letter-spacing:1px}#fs-lock .lrow b{display:block;font-size:18px;color:#fff;font-weight:900;margin-top:1px;letter-spacing:0;font-variant-numeric:tabular-nums}#fs-lock .lrow .pf b{color:' + C_OK + '}' +
+    '#fs-lock .lsub{font-size:12px;color:' + C_MUT + ';max-width:330px}' +
+    '#fs-lock .lbtns{display:flex;gap:10px;margin-top:6px}#fs-lock .lbtns button{border:0;border-radius:999px;padding:13px 28px;font-size:15px;font-weight:900}' +
+    '#fs-lstop{background:linear-gradient(135deg,#fb7185,#fb923c);color:#fff}#fs-lhide{background:rgba(255,255,255,.1);color:' + C_TXT + '}' +
+    // live feed
+    '.fs-tidy{font-size:11px;color:' + C_MUT + ';letter-spacing:.3px;min-height:14px}' +
+    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow:hidden;text-align:left;margin-top:2px;-webkit-mask:linear-gradient(#000 75%,transparent)}' +
     '#fs-body .fs-feed{max-width:none;max-height:240px;margin:10px 0 0}' +
-    '.fs-fl{display:flex;align-items:center;gap:9px;padding:7px 11px;border-radius:10px;background:#101b27;border:1px solid #1d2c3c;color:#cdd8e4;font-size:12.5px;line-height:1.3;animation:fsin .38s cubic-bezier(.2,.9,.3,1.25) both}' +
-    '.fs-fl .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fs-fl .tm{color:#6f8498;font-size:11px;font-variant-numeric:tabular-nums}' +
-    '.fs-fl:before{content:"";width:7px;height:7px;border-radius:50%;background:#3d5166;flex:none}' +
-    '.fs-fl.miss:first-child:before{background:#00CAF6;box-shadow:0 0 0 0 rgba(0,202,246,.7);animation:fsping 1.1s ease-out infinite}' +
-    '.fs-fl.check:before{background:#f3c969}.fs-fl.price:before{background:#00CAF6}.fs-fl.list:before{background:#9f8cff}.fs-fl.break:before{background:#8ea0b5}.fs-fl.stop:before{background:#FF5D0B}' +
-    '.fs-fl.hit{background:linear-gradient(90deg,#0f3324,#101b27);border-color:#19e67d;color:#c9ffe3;font-weight:700;animation:fsin .38s cubic-bezier(.2,.9,.3,1.25) both,fsglow 1.6s ease-out}.fs-fl.hit:before{background:#19e67d}' +
-    '.fs-fl:first-child{border-color:#2b4a5e}' +
+    '.fs-fl{display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';color:#d5dce8;font-size:12.5px;line-height:1.3;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both}' +
+    '.fs-fl .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fs-fl .tm{color:#6b7487;font-size:11px;font-variant-numeric:tabular-nums}' +
+    '.fs-fl:before{content:"";width:7px;height:7px;border-radius:50%;background:#4b5466;flex:none}' +
+    '.fs-fl.miss:first-child:before{background:' + C_A1 + ';animation:fsping 1.1s ease-out infinite}' +
+    '.fs-fl.check:before{background:#fbbf24}.fs-fl.price:before{background:' + C_A1 + '}.fs-fl.list:before{background:' + C_A2 + '}.fs-fl.break:before{background:' + C_MUT + '}.fs-fl.stop:before{background:#fb7185}' +
+    '.fs-fl.hit{background:linear-gradient(90deg,rgba(52,211,153,.22),rgba(255,255,255,.04));border-color:rgba(52,211,153,.6);color:#d1fae5;font-weight:800;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both,fsglow 1.8s ease-out}.fs-fl.hit:before{background:' + C_OK + '}' +
+    '.fs-fl:first-child{border-color:rgba(34,211,238,.3)}' +
     '.fs-feed.clearing .fs-fl{animation:fsout .45s ease-in forwards}' +
     '@keyframes fsin{from{opacity:0;transform:translateY(-14px) scale(.95)}to{opacity:1;transform:none}}' +
     '@keyframes fsout{to{opacity:0;transform:translateX(60px) scale(.9)}}' +
-    '@keyframes fsping{to{box-shadow:0 0 0 9px rgba(0,202,246,0)}}' +
-    '@keyframes fsglow{0%{box-shadow:0 0 0 0 rgba(25,230,125,.8)}100%{box-shadow:0 0 0 14px rgba(25,230,125,0)}}' +
-    '.fs-tidy{font-size:11px;color:#8ea0b5;letter-spacing:.3px;min-height:14px}';
+    '@keyframes fsping{0%{box-shadow:0 0 0 0 rgba(34,211,238,.7)}100%{box-shadow:0 0 0 9px rgba(34,211,238,0)}}' +
+    '@keyframes fsglow{0%{box-shadow:0 0 0 0 rgba(52,211,153,.8)}100%{box-shadow:0 0 0 16px rgba(52,211,153,0)}}' +
+    // snipe celebration
+    '#fs-fx{position:fixed;inset:0;z-index:2147483647;pointer-events:none;font-family:' + FONT + ';transition:opacity .6s}#fs-fx.out{opacity:0}#fs-fx canvas{position:absolute;inset:0;width:100%;height:100%}' +
+    '#fs-fx:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 42%,rgba(6,8,13,.85),rgba(6,8,13,.45) 75%);animation:fsfade .25s ease-out}' +
+    '#fs-fx .fx-flash{position:absolute;inset:0;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.95),rgba(52,211,153,.5) 30%,transparent 70%);animation:fxflash .7s ease-out forwards}@keyframes fxflash{from{opacity:1}to{opacity:0}}' +
+    '#fs-fx .fx-ring{position:absolute;left:50%;top:42%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;border:4px solid ' + C_OK + ';animation:fxring 1.1s cubic-bezier(.1,.8,.3,1) forwards}#fs-fx .fx-ring.r2{border-color:' + C_A1 + ';animation-delay:.12s}#fs-fx .fx-ring.r3{border-color:' + C_A2 + ';animation-delay:.24s}' +
+    '@keyframes fxring{from{transform:scale(.2);opacity:1}to{transform:scale(18);opacity:0;border-width:1px}}' +
+    '#fs-fx .fx-txt{position:absolute;left:0;right:0;top:42%;transform:translateY(-50%);text-align:center}' +
+    '#fs-fx .fx-big{font-size:min(19vw,92px);font-weight:950;font-style:italic;letter-spacing:-3px;line-height:1;background:linear-gradient(135deg,#fff,' + C_OK + ' 40%,' + C_A1 + ' 70%,' + C_A2 + ');-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 6px 24px rgba(52,211,153,.55));animation:fxpop .7s cubic-bezier(.2,1.6,.4,1) both}' +
+    '@keyframes fxpop{0%{transform:scale(3) rotate(-8deg);opacity:0;filter:blur(8px)}60%{transform:scale(.9) rotate(2deg);opacity:1;filter:blur(0)}100%{transform:scale(1) rotate(-3deg)}}' +
+    '#fs-fx .fx-name{margin-top:10px;font-size:20px;font-weight:900;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.6);animation:fxup .5s .25s both}' +
+    '#fs-fx .fx-meta{margin-top:6px;font-size:16px;font-weight:800;color:#d5dce8;animation:fxup .5s .35s both}#fs-fx .fx-meta span{color:' + C_OK + ';background:rgba(6,8,13,.7);border:1px solid rgba(52,211,153,.5);border-radius:999px;padding:3px 10px;margin-left:6px}' +
+    '@keyframes fxup{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}';
 
   // ---------- UI ----------
   var logLines = [], activity = '';
@@ -632,7 +771,7 @@
   function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
     feedLines.unshift(l);
-    try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
+    try { console.log('[TangaTolga] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
     for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
   }
@@ -683,6 +822,8 @@
       '<div id="fs-act"></div><div class="fs-tidy"></div><div class="fs-feed"></div>' +
       '<div class="fs-rows" style="margin-top:11px">' +
         row('🎯', 'Target profit / card', 'minProfit') +
+        segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
+        swRow('📳', 'Vibrate on snipe', 'vibrate') +
         segRow('⏳', 'List for', 'listDur', LIST_DURS) +
         swRow('🧾', 'Auto-relist after buy', 'autoList') +
         swRow('♻️', 'Relist expired cards', 'relistExpired') +
@@ -693,7 +834,7 @@
         sliderRow('⏸️', 'Break every', 'breakEvery', 20, 120, 5, ' searches') +
         sliderRow('😴', 'Break length', 'breakSec', 15, 300, 5, 's') +
       '</div>' +
-      '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-diag">Copy diag</button></div>' +
+      '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-test">🎉 Test snipe</button><button id="fs-diag">Copy diag</button></div>' +
       '<details class="fs-sec"><summary>Prices</summary><div class="fs-card" style="margin-top:8px"><div class="fs-cols">' +
         '<div class="c"><div class="l">EA min</div><div class="v" id="fs-emin">—</div></div>' +
         '<div class="c"><div class="l">EA max</div><div class="v" id="fs-emax">—</div></div>' +
@@ -782,7 +923,7 @@
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
-      '<div id="fs-head"><div><span class="t">⚡ FUT Snipe</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
+      '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tabs">' +
         '<div class="fs-tab" data-tab="snipe">Snipe</div>' +
         '<div class="fs-tab" data-tab="filters">Filters</div>' +
@@ -795,9 +936,9 @@
     makeFabDraggable(fab);
 
     var lock = document.createElement('div'); lock.id = 'fs-lock';
-    lock.innerHTML = '<div class="spin"></div><div class="lbig">⚡ FUT Snipe running</div>' +
+    lock.innerHTML = '<div class="radar"></div><div class="lbig">TangaTolga <b>hunting</b></div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
-      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
+      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
       '<div class="fs-tidy"></div><div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
@@ -815,12 +956,13 @@
       if (!tg || !el.contains(tg)) return;
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
-      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); save(); render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
-        case 'fs-start': if (running) stopAll(); else start(); break;
+        case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
+        case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
@@ -841,7 +983,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -867,7 +1010,9 @@
     var pr = market.snipe ? profitAt(market.price, market.snipe) : null;
     if ($('fs-hero-max')) $('fs-hero-max').textContent = market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
     if ($('fs-hero-sub')) $('fs-hero-sub').textContent = market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
-    if ($('fs-hero-prof')) { $('fs-hero-prof').textContent = pr == null ? '' : (signed(pr) + ' / card after tax'); $('fs-hero-prof').style.color = pr != null && pr < 0 ? '#ff8a5c' : '#19e67d'; }
+    // EA's price steps (50/100/250/500/1000) round the snipe point down, so the real profit at the
+    // snipe point is usually a bit above the target: that's the minimum per card.
+    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
     if ($('fs-emin')) $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
     if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
     if ($('fs-cheap')) $('fs-cheap').textContent = stats.cheapest != null ? fmt(stats.cheapest) : '—';

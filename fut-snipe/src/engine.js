@@ -124,7 +124,7 @@
         var e = profitAt(market.price, price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price;
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); render();
+        feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
         await relist(r.items[j].it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;

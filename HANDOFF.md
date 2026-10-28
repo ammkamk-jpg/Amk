@@ -2,11 +2,12 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
-## Status (v2.8.0, branch `fut-snipe-one-button`)
+## Status (v3.0.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
 - Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
 - v2.6.0: re-check slider 30-120, randomised gaps/breaks/re-checks, live feed (one line per search, clears after ~20 with a short pause), relists expired transfer-list cards via EA's Re-list all.
 - v2.7.0: real web-app diag showed cards are drawn on <canvas> with no player id in the DOM, but each `li.listFUTItem` row has a hidden `.ut-item-view--stats` row "AVG <coins>". Price tags now show that value on every card (Club too), no searches. Search-based club pricing and the per-id price cache were removed. ⚡ button is draggable (position saved). Diag now lists all `services` keys and Item methods (check for `relistExpiredAuctions` / `requestTransferItems`).
 - v2.8.0: AVG is EA's own (added this year, visible on PS5). Tag sits on `.rowContent`, positioned by measuring the card canvas (EA scales the card and clips inside it). Search gap = base +2..30% (never below base) + 7% longer pauses; price-check searches 35% slower. Price check starts at the last price (re-check) or the cheapest listing seen, steps ~12% then halves (`nextProbe`). ⚡ glides to the nearest side with momentum. Diag confirmed `relistExpiredAuctions` + `requestTransferItems` exist.
+- v3.0.0: renamed TangaTolga Sniper (@name/@namespace changed, @downloadURL/@updateURL added; same localStorage keys). If an old FUT Snipe loaded first it shows a delete-the-old-one warning and exits. New look (styles.js tokens), snipe celebration in fx.js (canvas burst, SNIPED!, shake), WebAudio sounds (Off/Coins/Arcade/Boom, unlocked on Start tap), vibration (navigator.vibrate or iOS 18 switch-checkbox haptic). Min profit/card + EA step shown after price check. 'few' now needs 2 fresh listings.
 - Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
 - Not yet tested on the real EA web app (user was still on 2.4.1 when sending diag).
 - fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).
