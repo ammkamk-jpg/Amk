@@ -64,6 +64,8 @@
         swRow('♻️', 'Relist expired cards', 'relistExpired') +
         sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
         swRow('🏷️', 'Price tags on cards', 'badges') +
+        swRow('🔄', 'Vary min bid (fresh results)', 'varyMinBid') +
+        '<div class="fs-hint">A different min bid (0-1,000) on every search so EA always returns fresh results.</div>' +
         segRow('🏎️', 'Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]]) +
         '<div class="fs-hint" id="fs-speedhint">' + speedHint() + '</div>' +
         sliderRow('⏸️', 'Break every', 'breakEvery', 20, 120, 5, ' searches') +

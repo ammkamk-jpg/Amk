@@ -17,9 +17,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow, minBuy) {
+  async function search(maxBuy, slow, minBuy, minBid) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy, minBuy); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy, minBid); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -130,9 +130,11 @@
   }
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
+  var lastMinBid = 0;
   async function snipeOnce() {
     var keep = keepMode(), minB = keep ? cfg.keepMin : 0;
-    var r = await search(market.snipe, false, minB); if (!r) return;
+    if (cfg.varyMinBid) lastMinBid = nextMinBid(lastMinBid, market.snipe);
+    var r = await search(market.snipe, false, minB, cfg.varyMinBid ? lastMinBid : 0); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var hits = r.items.filter(function (x) { return x.p <= market.snipe && x.p >= minB; }).length;

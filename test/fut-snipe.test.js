@@ -170,3 +170,16 @@ test("special version bought by a player search", () => {
   assert.equal(P.isSpecialBuy(special, { rarities: [3] }), false, "searched with a rarity: wanted");
   assert.equal(P.isSpecialBuy(special, { maskedDefId: 231747 }), true, "no rarities field");
 });
+
+test("min bid for fresh results: varies, stays low, never repeats", () => {
+  let prev = 0; const seen = new Set();
+  for (let i = 0; i < 500; i++) {
+    const v = P.nextMinBid(prev, 13750);
+    assert.notEqual(v, prev, "never the same twice in a row");
+    assert.ok(v === 0 || (v >= 150 && v <= 1000 && v % 50 === 0), String(v));
+    seen.add(v); prev = v;
+  }
+  assert.ok(seen.size > 10, "spread over many values");
+  for (let i = 0; i < 100; i++) assert.ok(P.nextMinBid(0, 1000) <= 500, "below half the snipe point");
+  assert.equal(P.nextMinBid(0, 250), 0, "cheap card: no min bid");
+});

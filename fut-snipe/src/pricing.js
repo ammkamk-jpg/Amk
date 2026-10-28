@@ -86,6 +86,20 @@
     return Math.round(n);
   }
 
+  // ---------- fresh results ----------
+  // A different min bid on every snipe search (0 or 150-1,000, below half the snipe point, never the
+  // same twice in a row) makes every request unique, so EA can't answer with a cached result.
+  // Min bid also hides a listing whose current/starting bid is lower, for that one search only.
+  function nextMinBid(prev, snipe, rnd) {
+    rnd = rnd || Math.random;
+    var top = Math.min(1000, Math.floor((snipe || 0) / 2 / 50) * 50), opts = [0];
+    for (var v = 150; v <= top; v += 50) opts.push(v);
+    if (opts.length < 2) return 0;
+    var pick = prev;
+    for (var i = 0; i < 6 && pick === prev; i++) pick = opts[Math.floor(rnd() * opts.length)];
+    return pick === prev ? opts[(opts.indexOf(prev) + 1) % opts.length] : pick;
+  }
+
   // ---------- safety stops ----------
   // Too many results: a sane buy price finds 0-2 cards; 10+ means the price is probably mistyped.
   var TOO_MANY = 10;
@@ -121,5 +135,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid };
   }

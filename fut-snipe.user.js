@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.5.0
+// @version      3.6.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.5.0';
+  var VERSION = '3.6.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -130,6 +130,20 @@
     return Math.round(n);
   }
 
+  // ---------- fresh results ----------
+  // A different min bid on every snipe search (0 or 150-1,000, below half the snipe point, never the
+  // same twice in a row) makes every request unique, so EA can't answer with a cached result.
+  // Min bid also hides a listing whose current/starting bid is lower, for that one search only.
+  function nextMinBid(prev, snipe, rnd) {
+    rnd = rnd || Math.random;
+    var top = Math.min(1000, Math.floor((snipe || 0) / 2 / 50) * 50), opts = [0];
+    for (var v = 150; v <= top; v += 50) opts.push(v);
+    if (opts.length < 2) return 0;
+    var pick = prev;
+    for (var i = 0; i < 6 && pick === prev; i++) pick = opts[Math.floor(rnd() * opts.length)];
+    return pick === prev ? opts[(opts.indexOf(prev) + 1) % opts.length] : pick;
+  }
+
   // ---------- safety stops ----------
   // Too many results: a sane buy price finds 0-2 cards; 10+ means the price is probably mistyped.
   var TOO_MANY = 10;
@@ -165,14 +179,14 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid };
   }
 
   // ---------- settings & storage ----------
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
@@ -282,11 +296,11 @@
   function applyFields(t, s) { for (var k in s) { if (k !== '__fromUs' && s[k] !== undefined && s[k] !== '') { try { t[k] = s[k]; } catch (e) {} } } return t; }
   // The user's search (player, rarity, ...) but with OUR prices: their own max-buy / min-buy /
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
-  function buildCriteria(maxBuy, minBuy) {
+  function buildCriteria(maxBuy, minBuy, minBid) {
     var out;
     if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
     else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
-    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
+    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = minBid > 0 ? minBid : 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
@@ -369,12 +383,12 @@
     return { stop: false, msg: 'request failed (' + code + ')' };
   }
   // One market search. Returns {ok, items: [{it, p, secs}] sorted cheapest first}.
-  function doSearch(maxBuy, minBuy) {
+  function doSearch(maxBuy, minBuy, minBid) {
     return new Promise(function (resolve) {
       var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
       var to = setTimeout(function () { finish({ ok: false, items: [], err: { msg: 'search timeout' } }); }, 15000);
       try { try { svc().Item.clearTransferMarketCache(); } catch (e) {}
-        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy), 1).observe(OBS, function (sender, resp) {
+        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy, minBid), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
           var raw = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
           var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || raw.length));
@@ -458,9 +472,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow, minBuy) {
+  async function search(maxBuy, slow, minBuy, minBid) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy, minBuy); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy, minBid); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -571,9 +585,11 @@
   }
 
   // Buy everything at or below the snipe point (any freshness), then relist each one.
+  var lastMinBid = 0;
   async function snipeOnce() {
     var keep = keepMode(), minB = keep ? cfg.keepMin : 0;
-    var r = await search(market.snipe, false, minB); if (!r) return;
+    if (cfg.varyMinBid) lastMinBid = nextMinBid(lastMinBid, market.snipe);
+    var r = await search(market.snipe, false, minB, cfg.varyMinBid ? lastMinBid : 0); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var hits = r.items.filter(function (x) { return x.p <= market.snipe && x.p >= minB; }).length;
@@ -1165,6 +1181,8 @@
         swRow('♻️', 'Relist expired cards', 'relistExpired') +
         sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
         swRow('🏷️', 'Price tags on cards', 'badges') +
+        swRow('🔄', 'Vary min bid (fresh results)', 'varyMinBid') +
+        '<div class="fs-hint">A different min bid (0-1,000) on every search so EA always returns fresh results.</div>' +
         segRow('🏎️', 'Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]]) +
         '<div class="fs-hint" id="fs-speedhint">' + speedHint() + '</div>' +
         sliderRow('⏸️', 'Break every', 'breakEvery', 20, 120, 5, ' searches') +

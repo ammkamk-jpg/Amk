@@ -2,7 +2,7 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
-## Status (v3.5.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
+## Status (v3.6.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
 - Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
 - v2.6.0: re-check slider 30-120, randomised gaps/breaks/re-checks, live feed (one line per search, clears after ~20 with a short pause), relists expired transfer-list cards via EA's Re-list all.
 - v2.7.0: real web-app diag showed cards are drawn on <canvas> with no player id in the DOM, but each `li.listFUTItem` row has a hidden `.ut-item-view--stats` row "AVG <coins>". Price tags now show that value on every card (Club too), no searches. Search-based club pricing and the per-id price cache were removed. ⚡ button is draggable (position saved). Diag now lists all `services` keys and Item methods (check for `relistExpiredAuctions` / `requestTransferItems`).
@@ -13,6 +13,7 @@ Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don'
 - v3.3.0: Hub redesigned like the user's Simple Trader screenshot (own style, no branding): Profit card (realized + unrealized from ledger.buys[].list, vs yesterday, sparkline), Activity (sessions, life.searches, avg profit/card), Safety assistant (pricing.js safetyStatus: searches today vs ~1800/day estimate, 6h pause after captcha/429 = life.lastBlock), trade list All/Bought/Sold with initials avatars.
 - v3.4.0: "After buy" = List (unchanged: price check + relist) / Transfer list (move, don't list) / Unassigned (leave). Keep modes skip the price check and use keepMax (required) + keepMin (optional, also sent as minBuy). Replaced the autoList switch.
 - v3.5.0: real player name (search box value / repositories.Item.getStaticDataByDefId / requestItemByDefId / own search result, never a special version's name). Safety stops: too many results (10+ at the manual price, before buying), price range (requestMarketData + /pricelimits XHR cache; unknown range = not checked, said once), keep special versions (player search w/o rarity: defId != base -> kept unlisted + exact price check). Price check in List mode counts only the searched base card when no rarity filter. Clear sold: Off / When full (>=95) / Always.
+- v3.6.0: varyMinBid (default on): snipe searches send a random min bid (0 or 150-1,000, < half the snipe point, never repeated) so every request is unique; price-check searches keep min bid 0.
 - Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
 - Not yet tested on the real EA web app (user was still on 2.4.1 when sending diag).
 - fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).
