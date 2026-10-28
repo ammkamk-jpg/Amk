@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.0.0
+// @version      3.1.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.0.0';
+  var VERSION = '3.1.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -104,15 +104,17 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: never below base, usually base +2..30% (bell-shaped around +16%, so
-  // 2.5s -> mostly 2.7-3.1s, never the same twice), and now and then (7%) a longer 1-4s pause,
+  // Gap between searches: never below base, spread wide and lopsided like a person's (2.5s ->
+  // anywhere 2.6-4.0s before mood, more often on the quick side), and now and then (6%) a 1.5-6s pause,
   // like someone glancing away.
   function humanGapMs(base, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (1.02 + 0.28 * (rnd() + rnd()) / 2);
-    if (rnd() < 0.07) ms += 1000 + rnd() * 3000;
+    var ms = base * (1.03 + 0.55 * Math.pow(rnd(), 1.8));
+    if (rnd() < 0.06) ms += 1500 + rnd() * 4500;
     return Math.round(ms);
   }
+  // Tempo "mood": a person isn't equally fast all session. 1.0-1.2x, re-rolled every 8-25 searches.
+  function nextMood(rnd) { rnd = rnd || Math.random; return { mood: 1 + 0.2 * rnd(), left: 8 + Math.floor(rnd() * 18) }; }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {
     rnd = rnd || Math.random;
@@ -127,7 +129,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
   }
 
   // ---------- settings & storage ----------
@@ -325,7 +327,11 @@
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
   // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
-  function pace(slow) { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * (slow ? 1.35 : 1)))); }
+  var tempo = { mood: 1, left: 0 };
+  function pace(slow) {
+    if (--tempo.left <= 0) tempo = nextMood();
+    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
+  }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
   async function search(maxBuy, slow) {
     if (!(await pace(slow))) return null;
@@ -334,14 +340,6 @@
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
     return r;
-  }
-  // After ~20 lines the feed clears itself; the bot takes a short pause while it does.
-  async function afterFeedLine() {
-    if (!feedFull()) return;
-    phase = 'tidy'; render();
-    await clearFeed();
-    await wait(rand(2000, 5000));
-    if (running) phase = 'running'; render();
   }
   // Long breaks every ~breakEvery searches (the exact number changes every time).
   async function maybeBreak() {
@@ -360,7 +358,7 @@
   async function findPrice() {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
-    feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check'); await afterFeedLine();
+    feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
@@ -371,7 +369,7 @@
       market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
       feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
-      await afterFeedLine();
+     
       if (v === 'few') { few = pr.items; break; }
       if (v === 'many') hiItems = pr.items;
       var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
@@ -427,7 +425,7 @@
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   async function snipeOnce() {
     var r = await search(market.snipe); if (!r) return;
-    if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return afterFeedLine(); }
+    if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
@@ -445,7 +443,7 @@
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
-    await afterFeedLine();
+   
   }
 
   async function runLoop() {
@@ -462,7 +460,7 @@
 
   function canStart() {
     if (running) return false;
-    resetRun(); clearFeed(true);
+    resetRun(); clearFeed();
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return false; }
     return true;
   }
@@ -728,8 +726,8 @@
     '#fs-lock .lbtns{display:flex;gap:10px;margin-top:6px}#fs-lock .lbtns button{border:0;border-radius:999px;padding:13px 28px;font-size:15px;font-weight:900}' +
     '#fs-lstop{background:linear-gradient(135deg,#fb7185,#fb923c);color:#fff}#fs-lhide{background:rgba(255,255,255,.1);color:' + C_TXT + '}' +
     // live feed
-    '.fs-tidy{font-size:11px;color:' + C_MUT + ';letter-spacing:.3px;min-height:14px}' +
-    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow:hidden;text-align:left;margin-top:2px;-webkit-mask:linear-gradient(#000 75%,transparent)}' +
+    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:36vh;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;text-align:left;margin-top:2px;padding-bottom:18px;-webkit-mask:linear-gradient(#000 85%,transparent);scrollbar-width:none}.fs-feed::-webkit-scrollbar{display:none}' +
+    '.fs-fl{flex:none}' +
     '#fs-body .fs-feed{max-width:none;max-height:240px;margin:10px 0 0}' +
     '.fs-fl{display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';color:#d5dce8;font-size:12.5px;line-height:1.3;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both}' +
     '.fs-fl .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fs-fl .tm{color:#6b7487;font-size:11px;font-variant-numeric:tabular-nums}' +
@@ -738,9 +736,7 @@
     '.fs-fl.check:before{background:#fbbf24}.fs-fl.price:before{background:' + C_A1 + '}.fs-fl.list:before{background:' + C_A2 + '}.fs-fl.break:before{background:' + C_MUT + '}.fs-fl.stop:before{background:#fb7185}' +
     '.fs-fl.hit{background:linear-gradient(90deg,rgba(52,211,153,.22),rgba(255,255,255,.04));border-color:rgba(52,211,153,.6);color:#d1fae5;font-weight:800;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both,fsglow 1.8s ease-out}.fs-fl.hit:before{background:' + C_OK + '}' +
     '.fs-fl:first-child{border-color:rgba(34,211,238,.3)}' +
-    '.fs-feed.clearing .fs-fl{animation:fsout .45s ease-in forwards}' +
     '@keyframes fsin{from{opacity:0;transform:translateY(-14px) scale(.95)}to{opacity:1;transform:none}}' +
-    '@keyframes fsout{to{opacity:0;transform:translateX(60px) scale(.9)}}' +
     '@keyframes fsping{0%{box-shadow:0 0 0 0 rgba(34,211,238,.7)}100%{box-shadow:0 0 0 9px rgba(34,211,238,0)}}' +
     '@keyframes fsglow{0%{box-shadow:0 0 0 0 rgba(52,211,153,.8)}100%{box-shadow:0 0 0 16px rgba(52,211,153,0)}}' +
     // snipe celebration
@@ -762,36 +758,25 @@
   // What the bot is doing right now (status line only; events go to the feed, see feed()).
   function say(m) { setActivity(m); }
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
-  // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Clears itself
-  // after ~20 lines (the bot pauses briefly meanwhile, see afterFeedLine).
-  var feedLines = [], feedLimit = 20, feedClearing = false;
+  // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Keeps the
+  // last FEED_MAX lines (older ones drop off quietly) and can be scrolled.
+  var feedLines = [], FEED_MAX = 200;
   function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
   function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
   // Every event, once: a line in the feed and the same line in the console.
   function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
-    feedLines.unshift(l);
+    feedLines.unshift(l); if (feedLines.length > FEED_MAX) feedLines.length = FEED_MAX;
     try { console.log('[TangaTolga] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
-    for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
-  }
-  function feedFull() { return feedLines.length >= feedLimit; }
-  function clearFeed(instant) {
-    feedLines = []; feedLimit = rand(18, 24);
-    var boxes = document.querySelectorAll('.fs-feed'), i;
-    if (instant) { for (i = 0; i < boxes.length; i++) boxes[i].innerHTML = ''; return Promise.resolve(); }
-    feedClearing = true; setTidy('clearing the list · short pause…');
-    for (i = 0; i < boxes.length; i++) {
-      boxes[i].classList.add('clearing');
-      var kids = boxes[i].children; for (var k = 0; k < kids.length; k++) kids[k].style.animationDelay = (k * 30) + 'ms';
+    for (var i = 0; i < boxes.length; i++) {
+      var bx = boxes[i], keep = bx.scrollTop > 4 ? bx.scrollHeight - bx.scrollTop : null; // reading older lines: don't jump
+      bx.insertAdjacentHTML('afterbegin', feedHTML(l));
+      while (bx.children.length > FEED_MAX) bx.removeChild(bx.lastChild);
+      if (keep != null) bx.scrollTop = bx.scrollHeight - keep;
     }
-    return sleep(900).then(function () {
-      var bx = document.querySelectorAll('.fs-feed');
-      for (var j = 0; j < bx.length; j++) { bx[j].classList.remove('clearing'); bx[j].innerHTML = ''; }
-      feedClearing = false; setTidy('');
-    });
   }
-  function setTidy(m) { var t = document.querySelectorAll('.fs-tidy'); for (var i = 0; i < t.length; i++) t[i].textContent = m; }
+  function clearFeed() { feedLines = []; var b = document.querySelectorAll('.fs-feed'); for (var i = 0; i < b.length; i++) b[i].innerHTML = ''; }
   function fillFeeds() { var html = feedLines.map(feedHTML).join(''), b = document.querySelectorAll('.fs-feed'); for (var i = 0; i < b.length; i++) if (!b[i].children.length && html) b[i].innerHTML = html; }
 
   function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
@@ -819,7 +804,7 @@
         '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
       '</div><div class="fs-life" id="fs-life"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
-      '<div id="fs-act"></div><div class="fs-tidy"></div><div class="fs-feed"></div>' +
+      '<div id="fs-act"></div><div class="fs-feed"></div>' +
       '<div class="fs-rows" style="margin-top:11px">' +
         row('🎯', 'Target profit / card', 'minProfit') +
         segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
@@ -940,10 +925,12 @@
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
-      '<div class="fs-tidy"></div><div class="fs-feed"></div>' +
+      '<div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
     document.body.appendChild(lock);
-    lock.addEventListener('touchmove', function (ev) { ev.preventDefault(); }, { passive: false });
+    // The lock screen blocks swipes so the web app underneath can't be scrolled by accident,
+    // except inside the feed, which you can scroll to read older searches.
+    lock.addEventListener('touchmove', function (ev) { if (!(ev.target.closest && ev.target.closest('.fs-feed'))) ev.preventDefault(); }, { passive: false });
     lock.querySelector('#fs-lstop').onclick = function () { stopAll(); };
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
 
@@ -1032,7 +1019,7 @@
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'tidy' ? 'Short pause…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
       $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
     }
   }

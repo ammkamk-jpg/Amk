@@ -62,15 +62,21 @@ test("probeMid stays on valid prices and stops when lo/hi are neighbours", () =>
   assert.ok(m > 9900 && m < 10250 && m === P.floorStep(m));
 });
 
-test("search gaps are never the same and stay in a human range", () => {
-  const gaps = Array.from({ length: 2000 }, () => P.humanGapMs(2500));
-  assert.ok(new Set(gaps).size > 500, "varied");
-  assert.ok(Math.min(...gaps) >= 2550, `never below 2.5s (min ${Math.min(...gaps)})`);
-  assert.ok(Math.max(...gaps) <= 2500 * 1.3 + 4000, `max ${Math.max(...gaps)}`);
-  const usual = gaps.filter((g) => g <= 2500 * 1.3).sort((a, b) => a - b);
-  const median = usual[usual.length >> 1];
-  assert.ok(median >= 2750 && median <= 3150, `usually ~2.9s (median ${median})`);
-  assert.ok(gaps.some((g) => g > 2500 * 1.3 + 500), "sometimes a longer pause");
+test("search gaps: never below 2.5s, widely spread, sometimes long", () => {
+  const gaps = Array.from({ length: 4000 }, () => P.humanGapMs(2500)).sort((a, b) => a - b);
+  const pct = (p) => gaps[Math.floor(gaps.length * p)];
+  assert.ok(gaps[0] >= 2575, `never below 2.5s (min ${gaps[0]})`);
+  assert.ok(pct(0.9) - pct(0.1) >= 900, `spread p10 ${pct(0.1)} .. p90 ${pct(0.9)}`);
+  assert.ok(pct(0.5) >= 2900 && pct(0.5) <= 3500, `median ${pct(0.5)}`);
+  assert.ok(gaps[gaps.length - 1] > 5000, "sometimes a long pause");
+  assert.ok(new Set(gaps).size > 900, "hardly ever the same twice");
+});
+
+test("tempo mood: 1.0-1.2x for 8-25 searches", () => {
+  for (let i = 0; i < 300; i++) {
+    const m = P.nextMood();
+    assert.ok(m.mood >= 1 && m.mood <= 1.2 && m.left >= 8 && m.left <= 25, JSON.stringify(m));
+  }
 });
 
 test("fuzzy counts: 50 +/- 20% -> 40..60, and not always the same", () => {

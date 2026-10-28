@@ -60,15 +60,17 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: never below base, usually base +2..30% (bell-shaped around +16%, so
-  // 2.5s -> mostly 2.7-3.1s, never the same twice), and now and then (7%) a longer 1-4s pause,
+  // Gap between searches: never below base, spread wide and lopsided like a person's (2.5s ->
+  // anywhere 2.6-4.0s before mood, more often on the quick side), and now and then (6%) a 1.5-6s pause,
   // like someone glancing away.
   function humanGapMs(base, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (1.02 + 0.28 * (rnd() + rnd()) / 2);
-    if (rnd() < 0.07) ms += 1000 + rnd() * 3000;
+    var ms = base * (1.03 + 0.55 * Math.pow(rnd(), 1.8));
+    if (rnd() < 0.06) ms += 1500 + rnd() * 4500;
     return Math.round(ms);
   }
+  // Tempo "mood": a person isn't equally fast all session. 1.0-1.2x, re-rolled every 8-25 searches.
+  function nextMood(rnd) { rnd = rnd || Math.random; return { mood: 1 + 0.2 * rnd(), left: 8 + Math.floor(rnd() * 18) }; }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {
     rnd = rnd || Math.random;
@@ -83,5 +85,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
   }

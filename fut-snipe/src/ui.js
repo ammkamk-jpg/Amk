@@ -4,36 +4,25 @@
   // What the bot is doing right now (status line only; events go to the feed, see feed()).
   function say(m) { setActivity(m); }
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
-  // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Clears itself
-  // after ~20 lines (the bot pauses briefly meanwhile, see afterFeedLine).
-  var feedLines = [], feedLimit = 20, feedClearing = false;
+  // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Keeps the
+  // last FEED_MAX lines (older ones drop off quietly) and can be scrolled.
+  var feedLines = [], FEED_MAX = 200;
   function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
   function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
   // Every event, once: a line in the feed and the same line in the console.
   function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
-    feedLines.unshift(l);
+    feedLines.unshift(l); if (feedLines.length > FEED_MAX) feedLines.length = FEED_MAX;
     try { console.log('[TangaTolga] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
-    for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
-  }
-  function feedFull() { return feedLines.length >= feedLimit; }
-  function clearFeed(instant) {
-    feedLines = []; feedLimit = rand(18, 24);
-    var boxes = document.querySelectorAll('.fs-feed'), i;
-    if (instant) { for (i = 0; i < boxes.length; i++) boxes[i].innerHTML = ''; return Promise.resolve(); }
-    feedClearing = true; setTidy('clearing the list · short pause…');
-    for (i = 0; i < boxes.length; i++) {
-      boxes[i].classList.add('clearing');
-      var kids = boxes[i].children; for (var k = 0; k < kids.length; k++) kids[k].style.animationDelay = (k * 30) + 'ms';
+    for (var i = 0; i < boxes.length; i++) {
+      var bx = boxes[i], keep = bx.scrollTop > 4 ? bx.scrollHeight - bx.scrollTop : null; // reading older lines: don't jump
+      bx.insertAdjacentHTML('afterbegin', feedHTML(l));
+      while (bx.children.length > FEED_MAX) bx.removeChild(bx.lastChild);
+      if (keep != null) bx.scrollTop = bx.scrollHeight - keep;
     }
-    return sleep(900).then(function () {
-      var bx = document.querySelectorAll('.fs-feed');
-      for (var j = 0; j < bx.length; j++) { bx[j].classList.remove('clearing'); bx[j].innerHTML = ''; }
-      feedClearing = false; setTidy('');
-    });
   }
-  function setTidy(m) { var t = document.querySelectorAll('.fs-tidy'); for (var i = 0; i < t.length; i++) t[i].textContent = m; }
+  function clearFeed() { feedLines = []; var b = document.querySelectorAll('.fs-feed'); for (var i = 0; i < b.length; i++) b[i].innerHTML = ''; }
   function fillFeeds() { var html = feedLines.map(feedHTML).join(''), b = document.querySelectorAll('.fs-feed'); for (var i = 0; i < b.length; i++) if (!b[i].children.length && html) b[i].innerHTML = html; }
 
   function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
@@ -61,7 +50,7 @@
         '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
       '</div><div class="fs-life" id="fs-life"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
-      '<div id="fs-act"></div><div class="fs-tidy"></div><div class="fs-feed"></div>' +
+      '<div id="fs-act"></div><div class="fs-feed"></div>' +
       '<div class="fs-rows" style="margin-top:11px">' +
         row('🎯', 'Target profit / card', 'minProfit') +
         segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
@@ -182,10 +171,12 @@
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
-      '<div class="fs-tidy"></div><div class="fs-feed"></div>' +
+      '<div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
     document.body.appendChild(lock);
-    lock.addEventListener('touchmove', function (ev) { ev.preventDefault(); }, { passive: false });
+    // The lock screen blocks swipes so the web app underneath can't be scrolled by accident,
+    // except inside the feed, which you can scroll to read older searches.
+    lock.addEventListener('touchmove', function (ev) { if (!(ev.target.closest && ev.target.closest('.fs-feed'))) ev.preventDefault(); }, { passive: false });
     lock.querySelector('#fs-lstop').onclick = function () { stopAll(); };
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
 
@@ -274,7 +265,7 @@
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'tidy' ? 'Short pause…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
       $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
     }
   }

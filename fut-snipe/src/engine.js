@@ -11,7 +11,11 @@
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
   // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
-  function pace(slow) { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * (slow ? 1.35 : 1)))); }
+  var tempo = { mood: 1, left: 0 };
+  function pace(slow) {
+    if (--tempo.left <= 0) tempo = nextMood();
+    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
+  }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
   async function search(maxBuy, slow) {
     if (!(await pace(slow))) return null;
@@ -20,14 +24,6 @@
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
     return r;
-  }
-  // After ~20 lines the feed clears itself; the bot takes a short pause while it does.
-  async function afterFeedLine() {
-    if (!feedFull()) return;
-    phase = 'tidy'; render();
-    await clearFeed();
-    await wait(rand(2000, 5000));
-    if (running) phase = 'running'; render();
   }
   // Long breaks every ~breakEvery searches (the exact number changes every time).
   async function maybeBreak() {
@@ -46,7 +42,7 @@
   async function findPrice() {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
-    feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check'); await afterFeedLine();
+    feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
@@ -57,7 +53,7 @@
       market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
       feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
-      await afterFeedLine();
+     
       if (v === 'few') { few = pr.items; break; }
       if (v === 'many') hiItems = pr.items;
       var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
@@ -113,7 +109,7 @@
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   async function snipeOnce() {
     var r = await search(market.snipe); if (!r) return;
-    if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return afterFeedLine(); }
+    if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
     stats.cheapest = r.items.length ? r.items[0].p : stats.cheapest;
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
@@ -131,7 +127,7 @@
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
-    await afterFeedLine();
+   
   }
 
   async function runLoop() {
@@ -148,7 +144,7 @@
 
   function canStart() {
     if (running) return false;
-    resetRun(); clearFeed(true);
+    resetRun(); clearFeed();
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return false; }
     return true;
   }

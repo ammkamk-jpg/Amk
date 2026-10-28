@@ -84,8 +84,8 @@
     '#fs-lock .lbtns{display:flex;gap:10px;margin-top:6px}#fs-lock .lbtns button{border:0;border-radius:999px;padding:13px 28px;font-size:15px;font-weight:900}' +
     '#fs-lstop{background:linear-gradient(135deg,#fb7185,#fb923c);color:#fff}#fs-lhide{background:rgba(255,255,255,.1);color:' + C_TXT + '}' +
     // live feed
-    '.fs-tidy{font-size:11px;color:' + C_MUT + ';letter-spacing:.3px;min-height:14px}' +
-    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow:hidden;text-align:left;margin-top:2px;-webkit-mask:linear-gradient(#000 75%,transparent)}' +
+    '.fs-feed{width:100%;max-width:380px;display:flex;flex-direction:column;gap:5px;max-height:36vh;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;text-align:left;margin-top:2px;padding-bottom:18px;-webkit-mask:linear-gradient(#000 85%,transparent);scrollbar-width:none}.fs-feed::-webkit-scrollbar{display:none}' +
+    '.fs-fl{flex:none}' +
     '#fs-body .fs-feed{max-width:none;max-height:240px;margin:10px 0 0}' +
     '.fs-fl{display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';color:#d5dce8;font-size:12.5px;line-height:1.3;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both}' +
     '.fs-fl .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fs-fl .tm{color:#6b7487;font-size:11px;font-variant-numeric:tabular-nums}' +
@@ -94,9 +94,7 @@
     '.fs-fl.check:before{background:#fbbf24}.fs-fl.price:before{background:' + C_A1 + '}.fs-fl.list:before{background:' + C_A2 + '}.fs-fl.break:before{background:' + C_MUT + '}.fs-fl.stop:before{background:#fb7185}' +
     '.fs-fl.hit{background:linear-gradient(90deg,rgba(52,211,153,.22),rgba(255,255,255,.04));border-color:rgba(52,211,153,.6);color:#d1fae5;font-weight:800;animation:fsin .4s cubic-bezier(.2,.9,.3,1.25) both,fsglow 1.8s ease-out}.fs-fl.hit:before{background:' + C_OK + '}' +
     '.fs-fl:first-child{border-color:rgba(34,211,238,.3)}' +
-    '.fs-feed.clearing .fs-fl{animation:fsout .45s ease-in forwards}' +
     '@keyframes fsin{from{opacity:0;transform:translateY(-14px) scale(.95)}to{opacity:1;transform:none}}' +
-    '@keyframes fsout{to{opacity:0;transform:translateX(60px) scale(.9)}}' +
     '@keyframes fsping{0%{box-shadow:0 0 0 0 rgba(34,211,238,.7)}100%{box-shadow:0 0 0 9px rgba(34,211,238,0)}}' +
     '@keyframes fsglow{0%{box-shadow:0 0 0 0 rgba(52,211,153,.8)}100%{box-shadow:0 0 0 16px rgba(52,211,153,0)}}' +
     // snipe celebration
