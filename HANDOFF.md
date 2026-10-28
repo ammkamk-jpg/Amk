@@ -2,6 +2,12 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
+## Status (v2.5.0, branch `fut-snipe-one-button`)
+- Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
+- Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
+- Not yet tested on the real EA web app; card-id reading for price tags is best-effort.
+- fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).
+
 ## Project
 iOS Safari userscript (Userscripts app by quoid) for the EA FC Ultimate Team web app: a transfer-market sniper.
 - Repo: ammkamk-jpg/Amk, branch master, file `fut-snipe.user.js` (v2.4.1, ~680 lines, single IIFE).
