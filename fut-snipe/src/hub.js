@@ -20,7 +20,7 @@
       var id = String(it.id); if (ledger.booked[id]) return;
       var sold = salePriceOf(it); if (!(sold > 0)) return;
       var b = ledger.buys[id], buy = b ? b.buy : null, profit = buy != null ? profitAt(sold, buy) : null, name = nameOf(it) || (b && b.name) || 'Card';
-      ledger.sales.unshift({ t: Date.now(), name: name, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
+      ledger.sales.unshift({ t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
       ledger.booked[id] = 1; delete ledger.buys[id]; n++;
       feed(name + ' sold for ' + fmt(sold) + (profit != null ? ' · ' + signed(profit) : ''), 'hit');
     });
@@ -61,6 +61,7 @@
   }
   async function listAt(it, price, why) {
     var ok = await listItem(it, Math.max(MIN_PRICE, price - stepFor(price)), price, cfg.listDur || 3600);
+    if (ok) noteList(it.id, price);
     feed(ok ? (nameOf(it) || 'Card') + ' listed for ' + fmt(price) + (why ? ' · ' + why : '') : 'Listing ' + (nameOf(it) || 'card') + ' failed', ok ? 'list' : 'stop');
     return ok;
   }
@@ -120,7 +121,7 @@
       await sleep(rand(800, 1800));
       if (!(await moveToTransfer(it))) { feed(name + ' · could not move to transfer list', 'stop'); continue; }
       await sleep(rand(600, 1300));
-      if (await listAt(it, pick.price, 'pack pull')) { noteBuy(it.id, 0, name, true); listed++; }
+      if (await listAt(it, pick.price, 'pack pull')) { noteBuy(it.id, 0, name, true, ratingOf(it), pick.price); listed++; }
     }
     return 'pack pulls: ' + listed + ' listed, ' + kept + ' kept';
   }

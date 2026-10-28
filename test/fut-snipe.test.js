@@ -132,3 +132,18 @@ test("price check: a stale cheap outlier is stepped over", () => {
   const r = runCheck(market, 9000);
   assert.equal(r.price, 15000, JSON.stringify(r)); // 2nd-cheapest fresh
 });
+
+test("safety assistant", () => {
+  assert.equal(P.safetyStatus(100, null).level, "ok");
+  assert.equal(P.safetyStatus(100, null).minutes, 60);
+  assert.equal(P.safetyStatus(1500, null).level, "warn");
+  assert.equal(P.safetyStatus(1900, null).level, "stop");
+  const b = P.safetyStatus(10, 30 * 60000);
+  assert.equal(b.level, "stop"); assert.match(b.hint, /30 min ago/);
+  assert.equal(P.safetyStatus(10, 7 * 3600000).level, "ok", "old block forgotten after 6h");
+});
+
+test("profit curve is cumulative, oldest first, skips unknown profits", () => {
+  const sales = [{ profit: 300 }, { profit: null }, { profit: -100 }, { profit: 1000 }]; // newest first
+  assert.deepEqual(P.profitCurve(sales), [1000, 900, 1200]);
+});

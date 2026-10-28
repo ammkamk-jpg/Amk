@@ -86,6 +86,29 @@
     return Math.round(n);
   }
 
+  // ---------- safety assistant ----------
+  // A rough guide, not EA's real limits (EA doesn't publish them): searches today, and how long
+  // ago EA last showed a captcha / 429. Returns {level: 'ok'|'warn'|'stop', title, hint, minutes}.
+  var SAFE_SEARCHES_DAY = 1800;
+  function safetyStatus(searchesToday, blockAgoMs) {
+    var h = 3600000;
+    if (blockAgoMs != null && blockAgoMs < 6 * h) {
+      var left = Math.ceil((6 * h - blockAgoMs) / h);
+      return { level: 'stop', title: 'Pause sniping', hint: 'EA flagged you ' + Math.max(1, Math.round(blockAgoMs / 60000)) + ' min ago · wait ~' + left + 'h', minutes: 0 };
+    }
+    var left2 = SAFE_SEARCHES_DAY - searchesToday;
+    if (left2 <= 0) return { level: 'stop', title: 'Enough for today', hint: searchesToday + ' searches today', minutes: 0 };
+    var minutes = Math.min(60, Math.floor(left2 / 18 / 15) * 15); // ~18 searches a minute at Normal speed
+    if (searchesToday > SAFE_SEARCHES_DAY * 0.66 || minutes < 15) return { level: 'warn', title: 'Take a longer break', hint: searchesToday + ' searches today', minutes: Math.max(minutes, 0) };
+    return { level: 'ok', title: 'You can snipe', hint: searchesToday + ' searches today', minutes: minutes };
+  }
+  // Cumulative profit points for the little chart (oldest first).
+  function profitCurve(sales, max) {
+    var pts = [], sum = 0, list = sales.filter(function (s) { return s.profit != null; }).slice(0, max || 30).reverse();
+    list.forEach(function (s) { sum += s.profit; pts.push(sum); });
+    return pts;
+  }
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve };
   }

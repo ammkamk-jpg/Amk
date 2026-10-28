@@ -47,4 +47,14 @@
     var bk = Object.keys(ledger.booked); if (bk.length > 600) bk.slice(0, bk.length - 600).forEach(function (k) { delete ledger.booked[k]; });
     ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
   }
-  function noteBuy(id, buy, name, pack) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack }; saveLedger(); }
+  function noteBuy(id, buy, name, pack, rating, list) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack, rating: rating || null, list: list || null }; saveLedger(); }
+  function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
+
+  // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).
+  function searchesToday() { var d = lsGet('futSnipe.dailyS', {}); return d.date === today() ? (d.n | 0) : 0; }
+  var searchesUnsaved = 0;
+  function countSearch() {
+    life.searches = (life.searches || 0) + 1;
+    var d = lsGet('futSnipe.dailyS', {}); lsSet('futSnipe.dailyS', { date: today(), n: (d.date === today() ? (d.n | 0) : 0) + 1 });
+    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); }
+  }

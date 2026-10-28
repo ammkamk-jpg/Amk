@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.2.0
+// @version      3.3.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.2.0';
+  var VERSION = '3.3.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -130,8 +130,31 @@
     return Math.round(n);
   }
 
+  // ---------- safety assistant ----------
+  // A rough guide, not EA's real limits (EA doesn't publish them): searches today, and how long
+  // ago EA last showed a captcha / 429. Returns {level: 'ok'|'warn'|'stop', title, hint, minutes}.
+  var SAFE_SEARCHES_DAY = 1800;
+  function safetyStatus(searchesToday, blockAgoMs) {
+    var h = 3600000;
+    if (blockAgoMs != null && blockAgoMs < 6 * h) {
+      var left = Math.ceil((6 * h - blockAgoMs) / h);
+      return { level: 'stop', title: 'Pause sniping', hint: 'EA flagged you ' + Math.max(1, Math.round(blockAgoMs / 60000)) + ' min ago · wait ~' + left + 'h', minutes: 0 };
+    }
+    var left2 = SAFE_SEARCHES_DAY - searchesToday;
+    if (left2 <= 0) return { level: 'stop', title: 'Enough for today', hint: searchesToday + ' searches today', minutes: 0 };
+    var minutes = Math.min(60, Math.floor(left2 / 18 / 15) * 15); // ~18 searches a minute at Normal speed
+    if (searchesToday > SAFE_SEARCHES_DAY * 0.66 || minutes < 15) return { level: 'warn', title: 'Take a longer break', hint: searchesToday + ' searches today', minutes: Math.max(minutes, 0) };
+    return { level: 'ok', title: 'You can snipe', hint: searchesToday + ' searches today', minutes: minutes };
+  }
+  // Cumulative profit points for the little chart (oldest first).
+  function profitCurve(sales, max) {
+    var pts = [], sum = 0, list = sales.filter(function (s) { return s.profit != null; }).slice(0, max || 30).reverse();
+    list.forEach(function (s) { sum += s.profit; pts.push(sum); });
+    return pts;
+  }
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve };
   }
 
   // ---------- settings & storage ----------
@@ -183,7 +206,17 @@
     var bk = Object.keys(ledger.booked); if (bk.length > 600) bk.slice(0, bk.length - 600).forEach(function (k) { delete ledger.booked[k]; });
     ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
   }
-  function noteBuy(id, buy, name, pack) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack }; saveLedger(); }
+  function noteBuy(id, buy, name, pack, rating, list) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack, rating: rating || null, list: list || null }; saveLedger(); }
+  function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
+
+  // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).
+  function searchesToday() { var d = lsGet('futSnipe.dailyS', {}); return d.date === today() ? (d.n | 0) : 0; }
+  var searchesUnsaved = 0;
+  function countSearch() {
+    life.searches = (life.searches || 0) + 1;
+    var d = lsGet('futSnipe.dailyS', {}); lsSet('futSnipe.dailyS', { date: today(), n: (d.date === today() ? (d.n | 0) : 0) + 1 });
+    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); }
+  }
 
   // ---------- run state (resetRun() clears it on every Start) ----------
   var running = false, stopReason = '', blockMsg = '', phase = 'idle', startTs = 0, startCoins = null;
@@ -248,6 +281,7 @@
   function priceOf(it) { return it && ((it._auction && it._auction.buyNowPrice) != null ? it._auction.buyNowPrice : (it.buyNowPrice != null ? it.buyNowPrice : (it.buyNow != null ? it.buyNow : null))); }
   function defIdOf(it) { try { return (it.definitionId != null ? it.definitionId : (it._staticData && it._staticData.id) || (it.resourceId) || (it.id)) || null; } catch (e) { return null; } }
   function expiresOf(it) { try { var a = it._auction || {}; if (a.expires != null) return a.expires; if (a.timeRemaining != null) return a.timeRemaining; var et = it.endTime || a.endTime; if (et) { var now = Date.now(); if (et > 1e12) return Math.round((et - now) / 1000); if (et > 1e9) return Math.round((et * 1000 - now) / 1000); } return null; } catch (e) { return null; } }
+  function ratingOf(it) { try { var r = it.rating != null ? it.rating : (it._staticData && it._staticData.rating); return r > 0 ? r : null; } catch (e) { return null; } }
   function nameOf(it) { try { return (it._staticData && it._staticData.name) || it.name || (it.getStaticData && it.getStaticData().name) || null; } catch (e) { return null; } }
   function searchLabel() { if (curName) return curName; var id = (capturedPlain && (capturedPlain.maskedDefId || capturedPlain.defId)) || stats.curDefId; return id ? ('player #' + id) : 'player'; }
   function sessionNet() { return (startCoins != null && coins() != null) ? coins() - startCoins : null; }
@@ -346,7 +380,7 @@
       sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
     }
   }
-  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); var m = /^(stopped|done)/i.test(reason) ? reason.charAt(0).toUpperCase() + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
+  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; if (/429|captcha|blocked/i.test(reason)) life.lastBlock = Date.now(); saveLife(); recordSession(); var m = /^(stopped|done)/i.test(reason) ? reason.charAt(0).toUpperCase() + reason.slice(1) : 'Stopped: ' + reason; say(m); feed(m, 'stop'); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
@@ -360,7 +394,7 @@
   async function search(maxBuy, slow) {
     if (!(await pace(slow))) return null;
     var r = await doSearch(maxBuy); if (!running) return null;
-    stats.searches++; stats.sinceBreak++;
+    stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
     return r;
@@ -428,6 +462,7 @@
     var moved = await moveToTransfer(item);
     await sleep(rand(600, 1200));
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
+    if (ok) noteList(item.id, sell);
     feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
     if (ok) await hubPass(true);
   }
@@ -444,7 +479,7 @@
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var e = profitAt(market.price, price);
-        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel());
+        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
         feed(searchLabel() + ' sniped for ' + fmt(price) + ' · +' + fmt(e), 'hit'); celebrate(searchLabel(), price, e); render();
         await relist(r.items[j].it);
@@ -506,7 +541,7 @@
       var id = String(it.id); if (ledger.booked[id]) return;
       var sold = salePriceOf(it); if (!(sold > 0)) return;
       var b = ledger.buys[id], buy = b ? b.buy : null, profit = buy != null ? profitAt(sold, buy) : null, name = nameOf(it) || (b && b.name) || 'Card';
-      ledger.sales.unshift({ t: Date.now(), name: name, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
+      ledger.sales.unshift({ t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
       ledger.booked[id] = 1; delete ledger.buys[id]; n++;
       feed(name + ' sold for ' + fmt(sold) + (profit != null ? ' · ' + signed(profit) : ''), 'hit');
     });
@@ -547,6 +582,7 @@
   }
   async function listAt(it, price, why) {
     var ok = await listItem(it, Math.max(MIN_PRICE, price - stepFor(price)), price, cfg.listDur || 3600);
+    if (ok) noteList(it.id, price);
     feed(ok ? (nameOf(it) || 'Card') + ' listed for ' + fmt(price) + (why ? ' · ' + why : '') : 'Listing ' + (nameOf(it) || 'card') + ' failed', ok ? 'list' : 'stop');
     return ok;
   }
@@ -606,7 +642,7 @@
       await sleep(rand(800, 1800));
       if (!(await moveToTransfer(it))) { feed(name + ' · could not move to transfer list', 'stop'); continue; }
       await sleep(rand(600, 1300));
-      if (await listAt(it, pick.price, 'pack pull')) { noteBuy(it.id, 0, name, true); listed++; }
+      if (await listAt(it, pick.price, 'pack pull')) { noteBuy(it.id, 0, name, true, ratingOf(it), pick.price); listed++; }
     }
     return 'pack pulls: ' + listed + ' listed, ' + kept + ' kept';
   }
@@ -870,6 +906,32 @@
     '.fs-sale{display:flex;justify-content:space-between;align-items:center;gap:10px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:10px 14px;margin-bottom:7px}' +
     '.fs-sale .nm{font-weight:800;font-size:13.5px}.fs-sale .de{font-size:11px;color:' + C_MUT + ';margin-top:1px}.fs-sale .pf{font-weight:900;font-size:15px;color:' + C_MUT + '}.fs-sale .pf.pos{color:' + C_OK + '}.fs-sale .pf.neg{color:' + C_WARN + '}' +
     '.fs-sale .pk{font-size:9.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:1px 6px;vertical-align:2px}' +
+    // hub dashboard
+    '.fs-dash{display:grid;grid-template-columns:1.3fr 1fr;gap:10px;margin-bottom:10px}' +
+    '.fs-dc{position:relative;overflow:hidden;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:20px;padding:13px 14px 12px;min-height:150px}' +
+    '.fs-dc.ac{border-color:rgba(34,211,238,.3)}' +
+    '.fs-dc .dh{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:' + C_MUT + ';font-weight:800}' +
+    '.fs-dc .di{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:rgba(255,255,255,.07);color:' + C_TXT + ';font-size:10px;letter-spacing:-2px}' +
+    '.fs-dc .dv{font-size:30px;font-weight:950;letter-spacing:-1px;margin:8px 0 4px;font-variant-numeric:tabular-nums}' +
+    '.fs-dc .dsub{font-size:11.5px;color:' + C_MUT + ';margin-top:3px;position:relative;z-index:1}.fs-dc .dsub b{color:' + C_A1 + '}.fs-dc .dsub.up{color:' + C_OK + '}.fs-dc .dsub.down{color:#fb7185}' +
+    '.fs-dc .spark{position:absolute;left:0;right:0;bottom:0;width:100%;height:46px;opacity:.9}' +
+    '.fs-dpair,.fs-dc .dpair{display:flex;gap:12px;margin:10px 0 8px}.fs-dc .dpair div{flex:1}.fs-dc .dpair b{display:block;font-size:24px;font-weight:950;font-variant-numeric:tabular-nums}.fs-dc .dpair span{font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:' + C_MUT + '}' +
+    '.fs-dc.ac .dsub b{color:' + C_TXT + '}' +
+    '.fs-safe{display:flex;align-items:center;gap:12px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:12px 14px;margin-bottom:12px}' +
+    '.fs-safe .ico{flex:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:950;font-size:18px;color:#0b0f1a;background:' + C_OK + ';box-shadow:0 0 18px rgba(52,211,153,.45)}' +
+    '.fs-safe.warn .ico{background:#fbbf24;box-shadow:0 0 18px rgba(251,191,36,.45)}.fs-safe.stop .ico{background:#fb7185;box-shadow:0 0 18px rgba(251,113,133,.45)}' +
+    '.fs-safe .tx{flex:1;min-width:0}.fs-safe .k{font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;color:' + C_MUT + ';font-weight:800}.fs-safe .t{font-size:16px;font-weight:900}.fs-safe .h{font-size:10.5px;color:#6b7487}' +
+    '.fs-safe .chip{flex:none;font-size:12px;font-weight:850;color:' + C_OK + ';background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.3);border-radius:999px;padding:6px 11px}' +
+    '.fs-safe.warn .chip{color:#fbbf24;background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.3)}.fs-safe.stop .chip{color:#fb7185;background:rgba(251,113,133,.12);border-color:rgba(251,113,133,.3)}' +
+    '.fs-tradebar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 9px}' +
+    '.fs-upd{background:transparent;border:1px solid ' + C_LINE + ';color:' + C_MUT + ';border-radius:999px;padding:6px 11px;font-size:11.5px;font-family:' + FONT + '}.fs-upd b{color:' + C_TXT + '}' +
+    '.fs-trade{display:flex;align-items:center;gap:11px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:10px 12px;margin-bottom:7px;animation:fsin .35s both}' +
+    '.fs-trade .av{flex:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#2b2210;background:linear-gradient(135deg,#fde68a,#d4a537);box-shadow:inset 0 0 0 2px rgba(255,255,255,.35)}' +
+    '.fs-trade .nm{flex:1;min-width:0;font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fs-trade .nm span{color:' + C_MUT + ';font-weight:700}.fs-trade .nm i{font-style:normal;font-size:9px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:1px 6px;vertical-align:2px}.fs-trade .de{font-size:10.5px;color:#6b7487;font-weight:600}' +
+    '.fs-trade .pf{font-weight:900;font-size:14px;font-variant-numeric:tabular-nums;color:' + C_MUT + '}.fs-trade .pf.open{color:' + C_A1 + '}.fs-trade .pf.pos{color:' + C_OK + '}.fs-trade .pf.neg{color:#fb7185}' +
+    '.fs-trade .stt{flex:none;font-size:11px;font-weight:850;border-radius:999px;padding:5px 10px}.fs-trade .stt:before{content:"✓ "}' +
+    '.fs-trade .stt.b{color:' + C_A1 + ';background:rgba(34,211,238,.12)}.fs-trade .stt.s{color:' + C_OK + ';background:rgba(52,211,153,.14)}' +
+    '.fs-more{width:100%;background:transparent;border:1px dashed ' + C_LINE + ';color:' + C_MUT + ';border-radius:14px;padding:9px;font-size:12px;font-weight:800;font-family:' + FONT + '}' +
     // floating button
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:50%;background:' + GRAD + ';color:#0b0f1a;font-size:25px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px -6px rgba(34,211,238,.6),0 0 0 3px rgba(255,255,255,.08);cursor:pointer;font-family:' + FONT + ';touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}' +
     '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.12);opacity:.92}' +
@@ -1007,17 +1069,28 @@
     return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
       '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
   }
+  // Hub, top to bottom: profit + activity cards, safety assistant, trades (bought / sold), then
+  // the transfer list tools.
+  var hubFilter = 'all', hubShowAll = false;
   function hubView() {
     return '' +
-      '<div class="fs-hero"><div class="l">Real profit · all time</div><div class="big" id="fs-h-real">—</div>' +
-        '<div class="sub" id="fs-h-today"></div><div class="prof" id="fs-h-sold"></div></div>' +
-      '<div class="fs-card"><div class="fs-ch">Transfer list <span id="fs-h-at" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
+      '<div class="fs-dash">' +
+        '<div class="fs-dc pr"><div class="dh"><span class="di">↗</span>Profit</div><div class="dv" id="fs-h-total">—</div>' +
+          '<div class="dsub">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
+        '<div class="fs-dc ac"><div class="dh"><span class="di">▮▮</span>Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
+          '<div class="dsub">avg <b id="fs-h-avg">—</b> / card</div></div>' +
+      '</div>' +
+      '<div class="fs-safe" id="fs-h-safe"><div class="ico" id="fs-h-safe-i">✓</div><div class="tx"><div class="k">Safety assistant</div><div class="t" id="fs-h-safe-t">—</div><div class="h" id="fs-h-safe-h"></div></div><div class="chip" id="fs-h-safe-c"></div></div>' +
+      '<div class="fs-tradebar"><div class="fs-segw" style="max-width:none;justify-content:flex-start">' +
+        '<button class="fs-sg" data-hf="all">All</button><button class="fs-sg" data-hf="open">Bought</button><button class="fs-sg" data-hf="sold">Sold</button></div>' +
+        '<button class="fs-upd" id="fs-h-refresh">Updated <b id="fs-h-at">—</b></button></div>' +
+      '<div id="fs-h-trades"></div>' +
+      '<div class="fs-card" style="margin-top:12px"><div class="fs-ch">Transfer list <span id="fs-h-cnt" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
         '<div class="c"><div class="l">Sold</div><div class="v g" id="fs-h-nsold">—</div></div>' +
         '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
         '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
-      '<button class="fs-btn fs-go" id="fs-h-refresh">↻ Refresh<span class="sub">reads your transfer list + unassigned items (no market searches)</span></button>' +
       '<div class="fs-hubbtns">' +
         '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
         '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
@@ -1027,29 +1100,62 @@
         swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
         swRow('🧹', 'Book &amp; clear sold while sniping', 'autoClearSold') +
         row('📦', 'List pack pulls worth at least', 'packMin') +
-      '</div>' +
-      '<div class="fs-ch" style="padding:4px 2px 8px">Recent sales</div><div id="fs-h-sales"></div>';
+      '</div>';
+  }
+  function initials(name) { var p = String(name || '?').replace(/[^\p{L}\s]/gu, '').trim().split(/\s+/); return ((p[0] || '?').charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase(); }
+  function tradeRows() {
+    var open = Object.keys(ledger.buys).map(function (id) { var b = ledger.buys[id]; return { t: b.t, name: b.name, rating: b.rating, open: true, pack: b.pack, profit: b.list ? profitAt(b.list, b.buy) : null }; });
+    var sold = ledger.sales.map(function (x) { return { t: x.t, name: x.name, rating: x.rating, open: false, pack: x.pack, profit: x.profit }; });
+    var rows = (hubFilter === 'open' ? open : hubFilter === 'sold' ? sold : open.concat(sold)).sort(function (a, b) { return b.t - a.t; });
+    return rows;
+  }
+  function sparkSVG(pts) {
+    if (pts.length < 2) return '';
+    var lo = Math.min.apply(null, pts.concat([0])), hi = Math.max.apply(null, pts.concat([1])), span = hi - lo || 1;
+    var xy = pts.map(function (v, i) { return (i * 100 / (pts.length - 1)).toFixed(1) + ',' + (30 - (v - lo) / span * 26).toFixed(1); });
+    return '<defs><linearGradient id="fsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".45"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></linearGradient></defs>' +
+      '<polygon fill="url(#fsg)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" stroke="#22d3ee" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
   }
   function renderHub($) {
-    var all = realProfit(0), today = realProfit(startOfToday());
-    if ($('fs-h-real')) $('fs-h-real').textContent = all.n ? signed(all.sum) : '—';
-    if ($('fs-h-today')) $('fs-h-today').textContent = 'today ' + (today.n ? signed(today.sum) : '—') + ' · ' + all.n + ' sale' + (all.n === 1 ? '' : 's') + ' with known cost';
-    if ($('fs-h-sold')) $('fs-h-sold').textContent = hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) + ' waiting to clear' : '';
-    if ($('fs-h-at')) $('fs-h-at').textContent = hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX + ' · ' + ago(hub.at) : '';
-    var n = function (v) { return hub.at ? String(v) : '—'; };
-    if ($('fs-h-nsold')) { $('fs-h-nsold').textContent = n(hub.sold); $('fs-h-nact').textContent = n(hub.active); $('fs-h-nexp').textContent = n(hub.expired); $('fs-h-nun').textContent = n(hub.unlisted); }
-    if ($('fs-h-clear-s')) $('fs-h-clear-s').textContent = hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first';
-    if ($('fs-h-exp-s')) $('fs-h-exp-s').textContent = hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first';
-    if ($('fs-h-packs-s')) $('fs-h-packs-s').textContent = hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned';
-    var rb = $('fs-h-refresh'); if (rb) rb.style.opacity = hub.busy === 'refresh' ? '.6' : '';
-    var sl = $('fs-h-sales');
-    if (sl) {
-      var html = ledger.sales.length ? ledger.sales.slice(0, 20).map(function (x) {
-        return '<div class="fs-sale"><div><div class="nm">' + esc(x.name) + (x.pack ? ' <span class="pk">pack</span>' : '') + '</div><div class="de">' + ago(x.t) + ' · ' + (x.buy != null ? fmt(x.buy) + ' → ' : 'sold ') + fmt(x.sold) + '</div></div>' +
-          '<div class="pf ' + (x.profit == null ? '' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div></div>';
-      }).join('') : '<div class="fs-empty">No sales booked yet.<br>Tap Refresh after cards sell.</div>';
-      if (sl.__html !== html) { sl.__html = html; sl.innerHTML = html; }
+    var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
+    var all = realProfit(0), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
+    var yOnly = yest.sum - today.sum, unreal = 0;
+    Object.keys(ledger.buys).forEach(function (id) { var b = ledger.buys[id]; if (b.list) unreal += profitAt(b.list, b.buy); });
+    set('fs-h-total', all.n || unreal ? fmt(all.sum + unreal) : '—');
+    set('fs-h-unreal', unreal ? signed(unreal) : '—');
+    var vs = $('fs-h-vs');
+    if (vs) {
+      var pct = yOnly ? Math.round((today.sum - yOnly) / Math.abs(yOnly) * 100) : null;
+      var t = pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      if (vs.textContent !== t) { vs.textContent = t; vs.className = 'dsub ' + (pct == null ? '' : pct >= 0 ? 'up' : 'down'); }
     }
+    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales, 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
+    set('fs-h-sess', String(sessions.length)); set('fs-h-srch', fmtk(life.searches || 0)); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
+    var st = safetyStatus(searchesToday(), life.lastBlock ? Date.now() - life.lastBlock : null), sb = $('fs-h-safe');
+    if (sb) {
+      sb.className = 'fs-safe ' + st.level; set('fs-h-safe-i', st.level === 'ok' ? '✓' : st.level === 'warn' ? '!' : '■');
+      set('fs-h-safe-t', st.title); set('fs-h-safe-h', st.hint + ' · estimate, not EA’s real limit');
+      set('fs-h-safe-c', st.minutes ? '⏱ ' + (st.minutes >= 60 ? '1h' : st.minutes + 'm') + ' sniping' : st.level === 'stop' ? 'rest' : 'short break');
+    }
+    var segs = document.querySelectorAll('[data-hf]'); for (var i = 0; i < segs.length; i++) { var on = segs[i].getAttribute('data-hf') === hubFilter; if (segs[i].classList.contains('on') !== on) segs[i].classList.toggle('on', on); }
+    set('fs-h-at', hub.busy === 'refresh' ? '…' : hub.at ? ago(hub.at).replace('just now', '0s ago') : 'tap to refresh');
+    var tl = $('fs-h-trades');
+    if (tl) {
+      var rows = tradeRows(), shown = hubShowAll ? rows.slice(0, 100) : rows.slice(0, 8);
+      var html = shown.length ? shown.map(function (x) {
+        return '<div class="fs-trade"><div class="av">' + esc(initials(x.name)) + '</div><div class="nm">' + esc(x.name) + (x.rating ? ' <span>(' + x.rating + ')</span>' : '') + (x.pack ? ' <i>pack</i>' : '') + '<div class="de">' + ago(x.t) + '</div></div>' +
+          '<div class="pf ' + (x.profit == null ? '' : x.open ? 'open' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div>' +
+          '<div class="stt ' + (x.open ? 'b' : 's') + '">' + (x.open ? 'Bought' : 'Sold') + '</div></div>';
+      }).join('') + (rows.length > 8 ? '<button class="fs-more" id="fs-h-more">' + (hubShowAll ? 'Show less' : 'Show all ' + rows.length) + '</button>' : '')
+        : '<div class="fs-empty">No trades yet.<br>Cards the bot buys and sells show up here.</div>';
+      if (tl.__html !== html) { tl.__html = html; tl.innerHTML = html; }
+    }
+    set('fs-h-cnt', hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX : '');
+    var n = function (v) { return hub.at ? String(v) : '—'; };
+    set('fs-h-nsold', n(hub.sold)); set('fs-h-nact', n(hub.active)); set('fs-h-nexp', n(hub.expired)); set('fs-h-nun', n(hub.unlisted));
+    set('fs-h-clear-s', hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first');
+    set('fs-h-exp-s', hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first');
+    set('fs-h-packs-s', hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned');
   }
   function statsView() {
     var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
@@ -1156,6 +1262,7 @@
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
+      var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
@@ -1167,6 +1274,7 @@
         case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
         case 'fs-reset2': resetLife(); break;
         case 'fs-h-refresh': hubRefreshButton(); break;
+        case 'fs-h-more': hubShowAll = !hubShowAll; render(); break;
         case 'fs-h-clear': hubClearButton(); break;
         case 'fs-h-exp': if (running) stopAll(); else startJob('expired'); break;
         case 'fs-h-packs': if (running) stopAll(); else startJob('packs'); break;
@@ -1243,6 +1351,7 @@
     }
   }
 
+  setInterval(function () { if (tab === 'hub' && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
   function boot(tries) {
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }

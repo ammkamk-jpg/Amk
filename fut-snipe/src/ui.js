@@ -87,17 +87,28 @@
     return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
       '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
   }
+  // Hub, top to bottom: profit + activity cards, safety assistant, trades (bought / sold), then
+  // the transfer list tools.
+  var hubFilter = 'all', hubShowAll = false;
   function hubView() {
     return '' +
-      '<div class="fs-hero"><div class="l">Real profit · all time</div><div class="big" id="fs-h-real">—</div>' +
-        '<div class="sub" id="fs-h-today"></div><div class="prof" id="fs-h-sold"></div></div>' +
-      '<div class="fs-card"><div class="fs-ch">Transfer list <span id="fs-h-at" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
+      '<div class="fs-dash">' +
+        '<div class="fs-dc pr"><div class="dh"><span class="di">↗</span>Profit</div><div class="dv" id="fs-h-total">—</div>' +
+          '<div class="dsub">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
+        '<div class="fs-dc ac"><div class="dh"><span class="di">▮▮</span>Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
+          '<div class="dsub">avg <b id="fs-h-avg">—</b> / card</div></div>' +
+      '</div>' +
+      '<div class="fs-safe" id="fs-h-safe"><div class="ico" id="fs-h-safe-i">✓</div><div class="tx"><div class="k">Safety assistant</div><div class="t" id="fs-h-safe-t">—</div><div class="h" id="fs-h-safe-h"></div></div><div class="chip" id="fs-h-safe-c"></div></div>' +
+      '<div class="fs-tradebar"><div class="fs-segw" style="max-width:none;justify-content:flex-start">' +
+        '<button class="fs-sg" data-hf="all">All</button><button class="fs-sg" data-hf="open">Bought</button><button class="fs-sg" data-hf="sold">Sold</button></div>' +
+        '<button class="fs-upd" id="fs-h-refresh">Updated <b id="fs-h-at">—</b></button></div>' +
+      '<div id="fs-h-trades"></div>' +
+      '<div class="fs-card" style="margin-top:12px"><div class="fs-ch">Transfer list <span id="fs-h-cnt" style="text-transform:none;letter-spacing:0;font-weight:600"></span></div><div class="fs-cols c4">' +
         '<div class="c"><div class="l">Sold</div><div class="v g" id="fs-h-nsold">—</div></div>' +
         '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
         '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
-      '<button class="fs-btn fs-go" id="fs-h-refresh">↻ Refresh<span class="sub">reads your transfer list + unassigned items (no market searches)</span></button>' +
       '<div class="fs-hubbtns">' +
         '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
         '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
@@ -107,29 +118,62 @@
         swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
         swRow('🧹', 'Book &amp; clear sold while sniping', 'autoClearSold') +
         row('📦', 'List pack pulls worth at least', 'packMin') +
-      '</div>' +
-      '<div class="fs-ch" style="padding:4px 2px 8px">Recent sales</div><div id="fs-h-sales"></div>';
+      '</div>';
+  }
+  function initials(name) { var p = String(name || '?').replace(/[^\p{L}\s]/gu, '').trim().split(/\s+/); return ((p[0] || '?').charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase(); }
+  function tradeRows() {
+    var open = Object.keys(ledger.buys).map(function (id) { var b = ledger.buys[id]; return { t: b.t, name: b.name, rating: b.rating, open: true, pack: b.pack, profit: b.list ? profitAt(b.list, b.buy) : null }; });
+    var sold = ledger.sales.map(function (x) { return { t: x.t, name: x.name, rating: x.rating, open: false, pack: x.pack, profit: x.profit }; });
+    var rows = (hubFilter === 'open' ? open : hubFilter === 'sold' ? sold : open.concat(sold)).sort(function (a, b) { return b.t - a.t; });
+    return rows;
+  }
+  function sparkSVG(pts) {
+    if (pts.length < 2) return '';
+    var lo = Math.min.apply(null, pts.concat([0])), hi = Math.max.apply(null, pts.concat([1])), span = hi - lo || 1;
+    var xy = pts.map(function (v, i) { return (i * 100 / (pts.length - 1)).toFixed(1) + ',' + (30 - (v - lo) / span * 26).toFixed(1); });
+    return '<defs><linearGradient id="fsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".45"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></linearGradient></defs>' +
+      '<polygon fill="url(#fsg)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" stroke="#22d3ee" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
   }
   function renderHub($) {
-    var all = realProfit(0), today = realProfit(startOfToday());
-    if ($('fs-h-real')) $('fs-h-real').textContent = all.n ? signed(all.sum) : '—';
-    if ($('fs-h-today')) $('fs-h-today').textContent = 'today ' + (today.n ? signed(today.sum) : '—') + ' · ' + all.n + ' sale' + (all.n === 1 ? '' : 's') + ' with known cost';
-    if ($('fs-h-sold')) $('fs-h-sold').textContent = hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) + ' waiting to clear' : '';
-    if ($('fs-h-at')) $('fs-h-at').textContent = hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX + ' · ' + ago(hub.at) : '';
-    var n = function (v) { return hub.at ? String(v) : '—'; };
-    if ($('fs-h-nsold')) { $('fs-h-nsold').textContent = n(hub.sold); $('fs-h-nact').textContent = n(hub.active); $('fs-h-nexp').textContent = n(hub.expired); $('fs-h-nun').textContent = n(hub.unlisted); }
-    if ($('fs-h-clear-s')) $('fs-h-clear-s').textContent = hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first';
-    if ($('fs-h-exp-s')) $('fs-h-exp-s').textContent = hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first';
-    if ($('fs-h-packs-s')) $('fs-h-packs-s').textContent = hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned';
-    var rb = $('fs-h-refresh'); if (rb) rb.style.opacity = hub.busy === 'refresh' ? '.6' : '';
-    var sl = $('fs-h-sales');
-    if (sl) {
-      var html = ledger.sales.length ? ledger.sales.slice(0, 20).map(function (x) {
-        return '<div class="fs-sale"><div><div class="nm">' + esc(x.name) + (x.pack ? ' <span class="pk">pack</span>' : '') + '</div><div class="de">' + ago(x.t) + ' · ' + (x.buy != null ? fmt(x.buy) + ' → ' : 'sold ') + fmt(x.sold) + '</div></div>' +
-          '<div class="pf ' + (x.profit == null ? '' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div></div>';
-      }).join('') : '<div class="fs-empty">No sales booked yet.<br>Tap Refresh after cards sell.</div>';
-      if (sl.__html !== html) { sl.__html = html; sl.innerHTML = html; }
+    var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
+    var all = realProfit(0), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
+    var yOnly = yest.sum - today.sum, unreal = 0;
+    Object.keys(ledger.buys).forEach(function (id) { var b = ledger.buys[id]; if (b.list) unreal += profitAt(b.list, b.buy); });
+    set('fs-h-total', all.n || unreal ? fmt(all.sum + unreal) : '—');
+    set('fs-h-unreal', unreal ? signed(unreal) : '—');
+    var vs = $('fs-h-vs');
+    if (vs) {
+      var pct = yOnly ? Math.round((today.sum - yOnly) / Math.abs(yOnly) * 100) : null;
+      var t = pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      if (vs.textContent !== t) { vs.textContent = t; vs.className = 'dsub ' + (pct == null ? '' : pct >= 0 ? 'up' : 'down'); }
     }
+    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales, 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
+    set('fs-h-sess', String(sessions.length)); set('fs-h-srch', fmtk(life.searches || 0)); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
+    var st = safetyStatus(searchesToday(), life.lastBlock ? Date.now() - life.lastBlock : null), sb = $('fs-h-safe');
+    if (sb) {
+      sb.className = 'fs-safe ' + st.level; set('fs-h-safe-i', st.level === 'ok' ? '✓' : st.level === 'warn' ? '!' : '■');
+      set('fs-h-safe-t', st.title); set('fs-h-safe-h', st.hint + ' · estimate, not EA’s real limit');
+      set('fs-h-safe-c', st.minutes ? '⏱ ' + (st.minutes >= 60 ? '1h' : st.minutes + 'm') + ' sniping' : st.level === 'stop' ? 'rest' : 'short break');
+    }
+    var segs = document.querySelectorAll('[data-hf]'); for (var i = 0; i < segs.length; i++) { var on = segs[i].getAttribute('data-hf') === hubFilter; if (segs[i].classList.contains('on') !== on) segs[i].classList.toggle('on', on); }
+    set('fs-h-at', hub.busy === 'refresh' ? '…' : hub.at ? ago(hub.at).replace('just now', '0s ago') : 'tap to refresh');
+    var tl = $('fs-h-trades');
+    if (tl) {
+      var rows = tradeRows(), shown = hubShowAll ? rows.slice(0, 100) : rows.slice(0, 8);
+      var html = shown.length ? shown.map(function (x) {
+        return '<div class="fs-trade"><div class="av">' + esc(initials(x.name)) + '</div><div class="nm">' + esc(x.name) + (x.rating ? ' <span>(' + x.rating + ')</span>' : '') + (x.pack ? ' <i>pack</i>' : '') + '<div class="de">' + ago(x.t) + '</div></div>' +
+          '<div class="pf ' + (x.profit == null ? '' : x.open ? 'open' : x.profit < 0 ? 'neg' : 'pos') + '">' + (x.profit == null ? '?' : signed(x.profit)) + '</div>' +
+          '<div class="stt ' + (x.open ? 'b' : 's') + '">' + (x.open ? 'Bought' : 'Sold') + '</div></div>';
+      }).join('') + (rows.length > 8 ? '<button class="fs-more" id="fs-h-more">' + (hubShowAll ? 'Show less' : 'Show all ' + rows.length) + '</button>' : '')
+        : '<div class="fs-empty">No trades yet.<br>Cards the bot buys and sells show up here.</div>';
+      if (tl.__html !== html) { tl.__html = html; tl.innerHTML = html; }
+    }
+    set('fs-h-cnt', hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX : '');
+    var n = function (v) { return hub.at ? String(v) : '—'; };
+    set('fs-h-nsold', n(hub.sold)); set('fs-h-nact', n(hub.active)); set('fs-h-nexp', n(hub.expired)); set('fs-h-nun', n(hub.unlisted));
+    set('fs-h-clear-s', hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first');
+    set('fs-h-exp-s', hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first');
+    set('fs-h-packs-s', hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned');
   }
   function statsView() {
     var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
@@ -236,6 +280,7 @@
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
+      var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
@@ -247,6 +292,7 @@
         case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
         case 'fs-reset2': resetLife(); break;
         case 'fs-h-refresh': hubRefreshButton(); break;
+        case 'fs-h-more': hubShowAll = !hubShowAll; render(); break;
         case 'fs-h-clear': hubClearButton(); break;
         case 'fs-h-exp': if (running) stopAll(); else startJob('expired'); break;
         case 'fs-h-packs': if (running) stopAll(); else startJob('packs'); break;
@@ -323,6 +369,7 @@
     }
   }
 
+  setInterval(function () { if (tab === 'hub' && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
   function boot(tries) {
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
