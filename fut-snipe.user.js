@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FUT Snipe (Userscripts / iOS Safari)
 // @namespace    local.fut.snipe
-// @version      2.7.0
+// @version      2.8.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -25,7 +25,7 @@
   'use strict';
   if (window.__futSnipeLoaded) return;
   window.__futSnipeLoaded = true;
-  var VERSION = '2.7.0';
+  var VERSION = '2.8.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -68,6 +68,16 @@
     if (m <= lo) m = floorStep(lo + stepFor(lo));
     return m > lo && m < hi ? m : 0;
   }
+  // Next max-buy for the price check, the way a person would do it: from a starting guess, step
+  // down ~12% while there are too many listings (up ~12% while there are none), and once the
+  // price is boxed in (a "none" below, a "many" above) halve the gap. lo/hi 0 = not known yet.
+  // Returns {lo, hi, next}; next 0 = boxed in to neighbouring prices.
+  function nextProbe(lo, hi, probe, verdict) {
+    var next;
+    if (verdict === 'many') { hi = probe; next = lo ? probeMid(lo, hi) : floorStep(probe * 0.88); if (next >= probe) next = 0; }
+    else { lo = probe; next = hi ? probeMid(lo, hi) : roundStep(Math.max(probe * 1.12, probe + stepFor(probe))); }
+    return { lo: lo, hi: hi, next: next };
+  }
   // What one probe result means: 'many' (go down), 'few' (found it) or 'none' (go up).
   // A few listings that are all old (no fresh drop) are stale outliers, so they count as none.
   function probeVerdict(listings) {
@@ -77,12 +87,13 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: base x 0.8-1.4 (bell-shaped, never the same twice), and now and then
-  // (8%) a longer pause of 1.5-5s, like someone glancing away.
+  // Gap between searches: never below base, usually base +2..30% (bell-shaped around +16%, so
+  // 2.5s -> mostly 2.7-3.1s, never the same twice), and now and then (7%) a longer 1-4s pause,
+  // like someone glancing away.
   function humanGapMs(base, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (0.8 + 0.6 * (rnd() + rnd()) / 2);
-    if (rnd() < 0.08) ms += 1500 + rnd() * 3500;
+    var ms = base * (1.02 + 0.28 * (rnd() + rnd()) / 2);
+    if (rnd() < 0.07) ms += 1000 + rnd() * 3000;
     return Math.round(ms);
   }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
@@ -99,7 +110,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
   }
 
   // ---------- settings & storage ----------
@@ -295,11 +306,12 @@
   function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); say('STOP: ' + reason); feed(reason, 'stop', true); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
-  // Human-like gap between searches (never exactly the same, sometimes a longer pause).
-  function pace() { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs))); }
+  // Human-like gap between searches (never below the speed setting, never exactly the same,
+  // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
+  function pace(slow) { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * (slow ? 1.35 : 1)))); }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy) {
-    if (!(await pace())) return null;
+  async function search(maxBuy, slow) {
+    if (!(await pace(slow))) return null;
     var r = await doSearch(maxBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++;
     if (!r.ok) { if ((r.err || {}).stop) { requestStop(r.err.msg); return null; } log('search: ' + ((r.err || {}).msg || '—')); }
@@ -324,30 +336,33 @@
     if (running) phase = back; render();
   }
 
-  // Price of the current search: search with NO max-buy (its dearest listing is the ceiling),
-  // then binary-search max-buy down until only a few listings are left (the cheapest ones), and
-  // take the 2nd-cheapest fresh one. Returns {price, fresh} or null (none listed / stopped).
+  // Price of the current search: one search with NO max-buy, then lower/raise max-buy like a
+  // person would (start at the last known price or the cheapest listing seen, step ~12%, then
+  // halve the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
+  // Returns {price, fresh} or null (none listed / stopped).
   async function findPrice() {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
-    var r = await search(0); if (!r) return null;
+    var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check'); await afterFeedLine();
     if (!r.ok || !r.items.length) return null;
-    var lo = stats.eaMin > 0 ? Math.max(0, stats.eaMin - stepFor(stats.eaMin)) : 0, hi = r.items[r.items.length - 1].p, hiItems = null, few = null;
-    if (probeVerdict(asListings(r.items)) === 'few') few = r.items; // tiny market: the unfiltered search already is "a few"
-    for (var tries = 0; !few && tries < 14 && running; tries++) {
-      var mid = probeMid(lo, hi); if (!mid) break;
-      var pr = await search(mid); if (!pr) return null;
+    if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
+    var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
+    var probe = Math.min(top, market.price > 0 ? floorStep(market.price) : roundStep(r.items[0].p));
+    for (var tries = 0; probe && tries < 12 && running; tries++) {
+      var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) continue;
-      market.probeMax = mid; market.probeCount = pr.items.length;
+      market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
-      feed('Checking ' + searchLabel() + ' ≤ ' + fmt(mid) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
+      feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
       await afterFeedLine();
-      if (v === 'none') lo = mid; else if (v === 'many') { hi = mid; hiItems = pr.items; } else few = pr.items;
+      if (v === 'few') { few = pr.items; break; }
+      if (v === 'many') hiItems = pr.items;
+      var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
     }
     if (!running) return null;
-    if (!few) { // lo and hi are neighbouring prices: the listings at hi are the cheapest there are
-      if (!hiItems) { var hr = await search(hi); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
-      few = hiItems;
+    if (!few) { // boxed in to neighbouring prices: the listings at hi are the cheapest there are
+      if (!hiItems && hi) { var hr = await search(hi, true); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
+      few = hiItems || r.items;
     }
     return pickMarketPrice(asListings(few));
   }
@@ -479,6 +494,7 @@
     if (badgeObs || !window.MutationObserver || !document.body) return;
     badgeObs = new MutationObserver(function () { paintBadges(); });
     try { badgeObs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {}
+    window.addEventListener('resize', paintBadges);
   }
   function paintBadges() { if (!cfg.badges || badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 300); }
   function removeBadges() { try { var b = document.querySelectorAll('.fs-badge'); for (var i = 0; i < b.length; i++) b[i].parentNode && b[i].parentNode.removeChild(b[i]); } catch (e) {} }
@@ -491,19 +507,32 @@
     }
     return null;
   }
+  // The tag lives on the row (EA shrinks the card itself and would clip anything inside it) and
+  // is placed by measuring where the card really is: centred on the card's bottom edge.
+  function placeBadge(b, host, card) {
+    var hr = host.getBoundingClientRect(), cr = card.getBoundingClientRect();
+    if (!cr.width || !hr.width) return;
+    var left = Math.round(Math.max(2, cr.left - hr.left + cr.width / 2 - b.offsetWidth / 2)) + 'px';
+    var top = Math.round(cr.bottom - hr.top - b.offsetHeight * 0.6) + 'px';
+    if (b.style.left !== left) b.style.left = left;
+    if (b.style.top !== top) b.style.top = top;
+  }
   function doPaintBadges() {
     if (badgeObs) badgeObs.disconnect();
     try {
       var rows = document.querySelectorAll(ROW_SEL);
       for (var i = 0; i < rows.length; i++) {
-        var row = rows[i], art = row.querySelector('.entityContainer .item') || row.querySelector('.entityContainer') || row; // the card itself
-        var label = avgLabelOf(row), old = art.querySelector('.fs-badge');
-        if (!(parseCoins(label) > 0)) { if (old) old.parentNode.removeChild(old); continue; }
+        var row = rows[i], host = row.querySelector('.rowContent') || row;
+        var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;
+        var label = avgLabelOf(row), b = host.querySelector('.fs-badge');
+        if (!(parseCoins(label) > 0)) { if (b) b.parentNode.removeChild(b); continue; }
         var text = '≈ ' + label;
-        if (old) { if (old.textContent !== text) old.textContent = text; continue; }
-        try { var cs = window.getComputedStyle(art); if (cs && cs.position === 'static') art.style.position = 'relative'; } catch (e) {}
-        var b = document.createElement('div'); b.className = 'fs-badge'; b.textContent = text;
-        art.appendChild(b);
+        if (!b) {
+          try { if (window.getComputedStyle(host).position === 'static') host.style.position = 'relative'; } catch (e) {}
+          b = document.createElement('div'); b.className = 'fs-badge'; host.appendChild(b);
+        }
+        if (b.textContent !== text) b.textContent = text;
+        placeBadge(b, host, card);
       }
     } catch (e) {}
     if (badgeObs) { try { badgeObs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {} }
@@ -525,10 +554,11 @@
     '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:4px;background:#2a3a4c;outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#00CAF6;border:3px solid #0b1017;box-shadow:0 1px 4px rgba(0,0,0,.4)}' +
     '.fs-hint{font-size:11px;color:#8ea0b5;padding:0 12px 10px;margin-top:-4px}' +
     '#fs-fab{position:fixed;right:16px;bottom:16px;z-index:2147483647;width:58px;height:58px;border-radius:30px;background:#00CAF6;color:#05222c;font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.5);cursor:pointer;font-family:-apple-system,system-ui,sans-serif}' +
+    '#fs-fab.glide{transition:left .5s cubic-bezier(.22,1,.36,1),top .5s cubic-bezier(.22,1,.36,1)}' +
     '#fs-fab{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}#fs-fab.drag{transform:scale(1.12);box-shadow:0 12px 30px rgba(0,0,0,.6);opacity:.92}' +
     '#fs-fab .dot{position:absolute;top:8px;right:8px;width:12px;height:12px;border-radius:6px;background:#19e67d;border:2px solid #05222c;display:none}' +
     '#fs-fab.run .dot{display:block}' +
-    '.fs-badge{position:absolute;left:50%;bottom:5px;transform:translateX(-50%);z-index:6;padding:1px 9px;border-radius:9px;background:#0b1620;border:1.5px solid #00CAF6;color:#eaf6ff;font:800 12px/1.35 -apple-system,system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.45);pointer-events:none}' +
+    '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:1px 9px;border-radius:9px;background:#0b1620;border:1.5px solid #00CAF6;color:#eaf6ff;font:800 12px/1.35 -apple-system,system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.45);pointer-events:none}' +
     '#fs-panel{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;font:14px/1.45 -apple-system,system-ui,"SF Pro Text",Roboto,sans-serif;color:#eaf0f6;background:#0b1017}' +
     '#fs-panel.open{display:flex}' +
     '#fs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;padding-top:max(13px,env(safe-area-inset-top));background:linear-gradient(180deg,#152030,#101722);border-bottom:1px solid #223041}' +
@@ -721,7 +751,8 @@
     if (saved && saved.x != null) placeFab(fab, saved.x, saved.y);
     window.addEventListener('resize', function () { var r = fab.getBoundingClientRect(); if (fab.style.left) placeFab(fab, r.left, r.top); });
     fab.addEventListener('pointerdown', function (e) {
-      var r = fab.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false };
+      var r = fab.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false, trail: [] };
+      fab.classList.remove('glide');
       try { fab.setPointerCapture(e.pointerId); } catch (x) {}
     });
     fab.addEventListener('pointermove', function (e) {
@@ -729,11 +760,21 @@
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 8) return; // a tap, not a drag
       drag.moved = true; fab.classList.add('drag'); e.preventDefault();
+      drag.trail.push({ x: e.clientX, y: e.clientY, t: Date.now() }); if (drag.trail.length > 6) drag.trail.shift();
       placeFab(fab, drag.l + dx, drag.t + dy);
     });
+    // Let go: keep the swipe's momentum for a moment, then glide to the nearest side and settle.
     var end = function () {
-      fab.classList.remove('drag'); // before measuring: the drag look scales the button
-      if (drag && drag.moved) { lsSet(FAB_KEY, { x: parseInt(fab.style.left, 10), y: parseInt(fab.style.top, 10) }); fabDraggedAt = Date.now(); }
+      fab.classList.remove('drag');
+      if (drag && drag.moved) {
+        var tr = drag.trail, a = tr[0], z = tr[tr.length - 1], dt = a && z ? Math.max(16, z.t - a.t) : 16;
+        var vx = a && z && Date.now() - z.t < 120 ? (z.x - a.x) / dt : 0, vy = a && z && Date.now() - z.t < 120 ? (z.y - a.y) / dt : 0;
+        var x = parseInt(fab.style.left, 10) + vx * 220, y = parseInt(fab.style.top, 10) + vy * 220;
+        var w = window.innerWidth || 390;
+        x = x + 29 < w / 2 ? 10 : w - 68; // snap to the closer side
+        fab.classList.add('glide'); placeFab(fab, x, y);
+        lsSet(FAB_KEY, { x: parseInt(fab.style.left, 10), y: parseInt(fab.style.top, 10) }); fabDraggedAt = Date.now();
+      }
       drag = null;
     };
     fab.addEventListener('pointerup', end); fab.addEventListener('pointercancel', end);

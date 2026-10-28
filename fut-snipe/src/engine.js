@@ -9,11 +9,12 @@
   function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); say('STOP: ' + reason); feed(reason, 'stop', true); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
-  // Human-like gap between searches (never exactly the same, sometimes a longer pause).
-  function pace() { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs))); }
+  // Human-like gap between searches (never below the speed setting, never exactly the same,
+  // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
+  function pace(slow) { return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * (slow ? 1.35 : 1)))); }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy) {
-    if (!(await pace())) return null;
+  async function search(maxBuy, slow) {
+    if (!(await pace(slow))) return null;
     var r = await doSearch(maxBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++;
     if (!r.ok) { if ((r.err || {}).stop) { requestStop(r.err.msg); return null; } log('search: ' + ((r.err || {}).msg || '—')); }
@@ -38,30 +39,33 @@
     if (running) phase = back; render();
   }
 
-  // Price of the current search: search with NO max-buy (its dearest listing is the ceiling),
-  // then binary-search max-buy down until only a few listings are left (the cheapest ones), and
-  // take the 2nd-cheapest fresh one. Returns {price, fresh} or null (none listed / stopped).
+  // Price of the current search: one search with NO max-buy, then lower/raise max-buy like a
+  // person would (start at the last known price or the cheapest listing seen, step ~12%, then
+  // halve the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
+  // Returns {price, fresh} or null (none listed / stopped).
   async function findPrice() {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
-    var r = await search(0); if (!r) return null;
+    var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check'); await afterFeedLine();
     if (!r.ok || !r.items.length) return null;
-    var lo = stats.eaMin > 0 ? Math.max(0, stats.eaMin - stepFor(stats.eaMin)) : 0, hi = r.items[r.items.length - 1].p, hiItems = null, few = null;
-    if (probeVerdict(asListings(r.items)) === 'few') few = r.items; // tiny market: the unfiltered search already is "a few"
-    for (var tries = 0; !few && tries < 14 && running; tries++) {
-      var mid = probeMid(lo, hi); if (!mid) break;
-      var pr = await search(mid); if (!pr) return null;
+    if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
+    var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
+    var probe = Math.min(top, market.price > 0 ? floorStep(market.price) : roundStep(r.items[0].p));
+    for (var tries = 0; probe && tries < 12 && running; tries++) {
+      var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) continue;
-      market.probeMax = mid; market.probeCount = pr.items.length;
+      market.probeMax = probe; market.probeCount = pr.items.length;
       var v = probeVerdict(asListings(pr.items));
-      feed('Checking ' + searchLabel() + ' ≤ ' + fmt(mid) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
+      feed('Checking ' + searchLabel() + ' ≤ ' + fmt(probe) + ' · ' + (pr.items.length > FEW ? FEW + '+' : pr.items.length) + ' listed', 'check'); render();
       await afterFeedLine();
-      if (v === 'none') lo = mid; else if (v === 'many') { hi = mid; hiItems = pr.items; } else few = pr.items;
+      if (v === 'few') { few = pr.items; break; }
+      if (v === 'many') hiItems = pr.items;
+      var n = nextProbe(lo, hi, probe, v); lo = n.lo; hi = n.hi; probe = n.next;
     }
     if (!running) return null;
-    if (!few) { // lo and hi are neighbouring prices: the listings at hi are the cheapest there are
-      if (!hiItems) { var hr = await search(hi); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
-      few = hiItems;
+    if (!few) { // boxed in to neighbouring prices: the listings at hi are the cheapest there are
+      if (!hiItems && hi) { var hr = await search(hi, true); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
+      few = hiItems || r.items;
     }
     return pickMarketPrice(asListings(few));
   }

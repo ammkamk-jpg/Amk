@@ -62,11 +62,14 @@ test("probeMid stays on valid prices and stops when lo/hi are neighbours", () =>
 });
 
 test("search gaps are never the same and stay in a human range", () => {
-  const gaps = Array.from({ length: 500 }, () => P.humanGapMs(2500));
-  assert.ok(new Set(gaps).size > 400, "varied");
-  assert.ok(Math.min(...gaps) >= 2000, `min ${Math.min(...gaps)}`);
-  assert.ok(Math.max(...gaps) <= 2500 * 1.4 + 5000, `max ${Math.max(...gaps)}`);
-  assert.ok(gaps.some((g) => g > 2500 * 1.4), "sometimes a longer pause");
+  const gaps = Array.from({ length: 2000 }, () => P.humanGapMs(2500));
+  assert.ok(new Set(gaps).size > 500, "varied");
+  assert.ok(Math.min(...gaps) >= 2550, `never below 2.5s (min ${Math.min(...gaps)})`);
+  assert.ok(Math.max(...gaps) <= 2500 * 1.3 + 4000, `max ${Math.max(...gaps)}`);
+  const usual = gaps.filter((g) => g <= 2500 * 1.3).sort((a, b) => a - b);
+  const median = usual[usual.length >> 1];
+  assert.ok(median >= 2750 && median <= 3150, `usually ~2.9s (median ${median})`);
+  assert.ok(gaps.some((g) => g > 2500 * 1.3 + 500), "sometimes a longer pause");
 });
 
 test("fuzzy counts: 50 +/- 20% -> 40..60, and not always the same", () => {
@@ -84,4 +87,41 @@ test("coin labels from EA's card rows", () => {
   assert.equal(P.parseCoins(" 850 "), 850);
   assert.equal(P.parseCoins("--"), null);
   assert.equal(P.parseCoins(null), null);
+});
+
+// Runs the price check the way the bot does, against a fake market; returns the price + searches used.
+function runCheck(market, start) {
+  const under = (max) => market.filter((l) => l.price <= max);
+  let lo = 0, hi = 0, probe = start, searches = 0, few = null, hiItems = null;
+  for (let t = 0; probe && t < 12; t++) {
+    searches++;
+    const items = under(probe), v = P.probeVerdict(items);
+    if (v === "few") { few = items; break; }
+    if (v === "many") hiItems = items;
+    ({ lo, hi, next: probe } = P.nextProbe(lo, hi, probe, v));
+  }
+  if (!few) few = hiItems;
+  return { price: P.pickMarketPrice(few).price, searches };
+}
+
+test("price check: from the cheapest listing seen, a few steps down", () => {
+  const market = Array.from({ length: 40 }, (_, i) => ({ price: 21500 + i * 250, secs: 3300 + (i % 4) * 60 }));
+  const r = runCheck(market, P.roundStep(26000));
+  assert.ok(r.price >= 21500 && r.price <= 22000, `price ${r.price}`);
+  assert.ok(r.searches <= 6, `${r.searches} searches`);
+});
+
+test("price check: re-check from the last price is quick", () => {
+  const market = Array.from({ length: 40 }, (_, i) => ({ price: 21500 + i * 250, secs: 3400 }));
+  assert.ok(runCheck(market, 21750).searches <= 2);
+  // market moved up 10%: still found in a few searches
+  const up = market.map((l) => ({ ...l, price: l.price + 2250 }));
+  const r = runCheck(up, 21750);
+  assert.ok(r.price >= 23750 && r.price <= 24250 && r.searches <= 5, JSON.stringify(r));
+});
+
+test("price check: a stale cheap outlier is stepped over", () => {
+  const market = [{ price: 9000, secs: 400 }].concat(Array.from({ length: 30 }, (_, i) => ({ price: 14750 + i * 250, secs: 3400 })));
+  const r = runCheck(market, 9000);
+  assert.ok(r.price >= 14750 && r.price <= 15250, JSON.stringify(r));
 });

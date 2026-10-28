@@ -8,6 +8,7 @@
     if (badgeObs || !window.MutationObserver || !document.body) return;
     badgeObs = new MutationObserver(function () { paintBadges(); });
     try { badgeObs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {}
+    window.addEventListener('resize', paintBadges);
   }
   function paintBadges() { if (!cfg.badges || badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 300); }
   function removeBadges() { try { var b = document.querySelectorAll('.fs-badge'); for (var i = 0; i < b.length; i++) b[i].parentNode && b[i].parentNode.removeChild(b[i]); } catch (e) {} }
@@ -20,19 +21,32 @@
     }
     return null;
   }
+  // The tag lives on the row (EA shrinks the card itself and would clip anything inside it) and
+  // is placed by measuring where the card really is: centred on the card's bottom edge.
+  function placeBadge(b, host, card) {
+    var hr = host.getBoundingClientRect(), cr = card.getBoundingClientRect();
+    if (!cr.width || !hr.width) return;
+    var left = Math.round(Math.max(2, cr.left - hr.left + cr.width / 2 - b.offsetWidth / 2)) + 'px';
+    var top = Math.round(cr.bottom - hr.top - b.offsetHeight * 0.6) + 'px';
+    if (b.style.left !== left) b.style.left = left;
+    if (b.style.top !== top) b.style.top = top;
+  }
   function doPaintBadges() {
     if (badgeObs) badgeObs.disconnect();
     try {
       var rows = document.querySelectorAll(ROW_SEL);
       for (var i = 0; i < rows.length; i++) {
-        var row = rows[i], art = row.querySelector('.entityContainer .item') || row.querySelector('.entityContainer') || row; // the card itself
-        var label = avgLabelOf(row), old = art.querySelector('.fs-badge');
-        if (!(parseCoins(label) > 0)) { if (old) old.parentNode.removeChild(old); continue; }
+        var row = rows[i], host = row.querySelector('.rowContent') || row;
+        var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;
+        var label = avgLabelOf(row), b = host.querySelector('.fs-badge');
+        if (!(parseCoins(label) > 0)) { if (b) b.parentNode.removeChild(b); continue; }
         var text = '≈ ' + label;
-        if (old) { if (old.textContent !== text) old.textContent = text; continue; }
-        try { var cs = window.getComputedStyle(art); if (cs && cs.position === 'static') art.style.position = 'relative'; } catch (e) {}
-        var b = document.createElement('div'); b.className = 'fs-badge'; b.textContent = text;
-        art.appendChild(b);
+        if (!b) {
+          try { if (window.getComputedStyle(host).position === 'static') host.style.position = 'relative'; } catch (e) {}
+          b = document.createElement('div'); b.className = 'fs-badge'; host.appendChild(b);
+        }
+        if (b.textContent !== text) b.textContent = text;
+        placeBadge(b, host, card);
       }
     } catch (e) {}
     if (badgeObs) { try { badgeObs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {} }

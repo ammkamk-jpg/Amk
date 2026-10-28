@@ -39,6 +39,16 @@
     if (m <= lo) m = floorStep(lo + stepFor(lo));
     return m > lo && m < hi ? m : 0;
   }
+  // Next max-buy for the price check, the way a person would do it: from a starting guess, step
+  // down ~12% while there are too many listings (up ~12% while there are none), and once the
+  // price is boxed in (a "none" below, a "many" above) halve the gap. lo/hi 0 = not known yet.
+  // Returns {lo, hi, next}; next 0 = boxed in to neighbouring prices.
+  function nextProbe(lo, hi, probe, verdict) {
+    var next;
+    if (verdict === 'many') { hi = probe; next = lo ? probeMid(lo, hi) : floorStep(probe * 0.88); if (next >= probe) next = 0; }
+    else { lo = probe; next = hi ? probeMid(lo, hi) : roundStep(Math.max(probe * 1.12, probe + stepFor(probe))); }
+    return { lo: lo, hi: hi, next: next };
+  }
   // What one probe result means: 'many' (go down), 'few' (found it) or 'none' (go up).
   // A few listings that are all old (no fresh drop) are stale outliers, so they count as none.
   function probeVerdict(listings) {
@@ -48,12 +58,13 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: base x 0.8-1.4 (bell-shaped, never the same twice), and now and then
-  // (8%) a longer pause of 1.5-5s, like someone glancing away.
+  // Gap between searches: never below base, usually base +2..30% (bell-shaped around +16%, so
+  // 2.5s -> mostly 2.7-3.1s, never the same twice), and now and then (7%) a longer 1-4s pause,
+  // like someone glancing away.
   function humanGapMs(base, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (0.8 + 0.6 * (rnd() + rnd()) / 2);
-    if (rnd() < 0.08) ms += 1500 + rnd() * 3500;
+    var ms = base * (1.02 + 0.28 * (rnd() + rnd()) / 2);
+    if (rnd() < 0.07) ms += 1000 + rnd() * 3000;
     return Math.round(ms);
   }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
@@ -70,5 +81,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, parseCoins: parseCoins };
   }

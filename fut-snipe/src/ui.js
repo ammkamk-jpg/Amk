@@ -130,7 +130,8 @@
     if (saved && saved.x != null) placeFab(fab, saved.x, saved.y);
     window.addEventListener('resize', function () { var r = fab.getBoundingClientRect(); if (fab.style.left) placeFab(fab, r.left, r.top); });
     fab.addEventListener('pointerdown', function (e) {
-      var r = fab.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false };
+      var r = fab.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false, trail: [] };
+      fab.classList.remove('glide');
       try { fab.setPointerCapture(e.pointerId); } catch (x) {}
     });
     fab.addEventListener('pointermove', function (e) {
@@ -138,11 +139,21 @@
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 8) return; // a tap, not a drag
       drag.moved = true; fab.classList.add('drag'); e.preventDefault();
+      drag.trail.push({ x: e.clientX, y: e.clientY, t: Date.now() }); if (drag.trail.length > 6) drag.trail.shift();
       placeFab(fab, drag.l + dx, drag.t + dy);
     });
+    // Let go: keep the swipe's momentum for a moment, then glide to the nearest side and settle.
     var end = function () {
-      fab.classList.remove('drag'); // before measuring: the drag look scales the button
-      if (drag && drag.moved) { lsSet(FAB_KEY, { x: parseInt(fab.style.left, 10), y: parseInt(fab.style.top, 10) }); fabDraggedAt = Date.now(); }
+      fab.classList.remove('drag');
+      if (drag && drag.moved) {
+        var tr = drag.trail, a = tr[0], z = tr[tr.length - 1], dt = a && z ? Math.max(16, z.t - a.t) : 16;
+        var vx = a && z && Date.now() - z.t < 120 ? (z.x - a.x) / dt : 0, vy = a && z && Date.now() - z.t < 120 ? (z.y - a.y) / dt : 0;
+        var x = parseInt(fab.style.left, 10) + vx * 220, y = parseInt(fab.style.top, 10) + vy * 220;
+        var w = window.innerWidth || 390;
+        x = x + 29 < w / 2 ? 10 : w - 68; // snap to the closer side
+        fab.classList.add('glide'); placeFab(fab, x, y);
+        lsSet(FAB_KEY, { x: parseInt(fab.style.left, 10), y: parseInt(fab.style.top, 10) }); fabDraggedAt = Date.now();
+      }
       drag = null;
     };
     fab.addEventListener('pointerup', end); fab.addEventListener('pointercancel', end);
