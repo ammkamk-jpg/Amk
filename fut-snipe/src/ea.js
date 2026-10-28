@@ -132,9 +132,9 @@
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
-          if (items.length && !curName) { // name from a result of the searched card itself, not a special version of it
+          if (items.length && !searchBase) { // name/id from a result of the searched card itself, not a special version of it
             var base = searchedDefId(), own = items.filter(function (x) { return !base || String(defIdOf(x.it)) === String(base); })[0] || items[0];
-            curName = nameOf(own.it) || curName; stats.curDefId = defIdOf(own.it) || stats.curDefId;
+            if (!curName) curName = nameOf(own.it); stats.curDefId = defIdOf(own.it) || stats.curDefId;
           }
           finish({ ok: true, items: items });
         });

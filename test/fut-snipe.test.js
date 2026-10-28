@@ -183,3 +183,16 @@ test("min bid for fresh results: varies, stays low, never repeats", () => {
   for (let i = 0; i < 100; i++) assert.ok(P.nextMinBid(0, 1000) <= 500, "below half the snipe point");
   assert.equal(P.nextMinBid(0, 250), 0, "cheap card: no min bid");
 });
+
+test("break-even price after tax", () => {
+  assert.equal(P.breakEven(19500), 20750); // 20,750 * 0.95 = 19,712 >= 19,500; 20,500 * 0.95 = 19,475 < 19,500
+  assert.ok(P.afterTax(P.breakEven(14000)) >= 14000);
+  assert.ok(P.afterTax(P.breakEven(14000) - P.stepFor(P.breakEven(14000))) < 14000, "lowest such price");
+});
+
+test("re-pricing expired cards never dumps them", () => {
+  assert.deepEqual(P.repriceFloor(21000, 22000, 19500), { price: 21000, floored: false }, "market price above break-even: use it");
+  assert.deepEqual(P.repriceFloor(18000, 22000, 19500), { price: 20750, floored: true }, "below what you paid: break-even");
+  assert.deepEqual(P.repriceFloor(15000, 22000, null), { price: 19750, floored: true }, "cost unknown: at most 10% under the old price");
+  assert.deepEqual(P.repriceFloor(20500, 22000, null), { price: 20500, floored: false });
+});

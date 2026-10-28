@@ -80,13 +80,14 @@
     var done = 0;
     for (var i = 0; i < expired.length && i < max && running; i++) {
       var it = expired[i], old = salePriceOf(it), name = nameOf(it) || 'Card';
-      setActivity('Re-pricing ' + name + '…');
+      setActivity('♻️ Re-pricing expired ' + name + '…');
+      feed('♻️ Expired ' + name + ' (was ' + fmt(old) + '): re-pricing', 'check');
       var pick = isPlayer(it) ? await withCard(it, function () { return findPrice(old); }) : null;
       if (!running) break;
-      var price = pick ? pick.price : old;
+      var b = ledger.buys[String(it.id)], cost = b && !b.pack ? b.buy : null;
+      var fl = pick ? repriceFloor(pick.price, old, cost) : { price: old, floored: false }, price = fl.price;
       if (!(price > 0)) { feed(name + ' · no price found, left expired', 'miss'); continue; }
-      var b = ledger.buys[String(it.id)], why = pick ? (price < old ? 'was ' + fmt(old) : price > old ? 'up from ' + fmt(old) : 'same price') : 'old price';
-      if (b && !b.pack && profitAt(price, b.buy) < 0) why += ' · below what you paid';
+      var why = !pick ? 'old price' : fl.floored ? 'market ' + fmt(pick.price) + ', kept at ' + (cost ? 'break-even' : 'max -10%') : price < old ? 'was ' + fmt(old) : price > old ? 'up from ' + fmt(old) : 'same price';
       await sleep(rand(600, 1400));
       if (await listAt(it, price, why)) done++;
     }
