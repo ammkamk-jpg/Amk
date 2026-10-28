@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RaumIdee</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Raum<b>Idee</b></h1>
+    <p>Foto, Raum und Stil wählen. Der Prompt geht mit deinem Foto in Gemini.</p>
+  </header>
+
+  <main>
+    <section class="step" aria-labelledby="h-photo">
+      <h2 id="h-photo"><span class="n">1</span>Dein Raum</h2>
+      <label class="drop" for="photo-input" id="photo-drop">
+        <img id="photo-img" alt="Dein Foto" hidden>
+        <span id="photo-empty">Foto aufnehmen oder auswählen</span>
+        <input id="photo-input" type="file" accept="image/*" hidden>
+      </label>
+      <p class="hint">Das Foto bleibt auf deinem Gerät. Es dient hier nur für den Vorher-Nachher-Vergleich.</p>
+    </section>
+
+    <section class="step" aria-labelledby="h-task">
+      <h2 id="h-task"><span class="n">2</span>Was soll passieren?</h2>
+      <div class="chips" id="tasks"></div>
+    </section>
+
+    <section class="step" aria-labelledby="h-room">
+      <div class="step-head">
+        <h2 id="h-room"><span class="n">3</span>Zimmer auswählen</h2>
+        <button class="link" id="rooms-all" type="button">Alle ansehen</button>
+      </div>
+      <div class="chips" id="rooms"></div>
+    </section>
+
+    <section class="step" aria-labelledby="h-style" id="style-step">
+      <div class="step-head">
+        <h2 id="h-style"><span class="n">4</span>Stil auswählen</h2>
+        <button class="link" id="styles-all" type="button">Alle ansehen</button>
+      </div>
+      <div class="cards" id="styles"></div>
+      <label class="own" for="custom-style">Eigener Stil
+        <input id="custom-style" type="text" maxlength="120" placeholder="z. B. 70er Retro mit Holzpaneelen">
+      </label>
+    </section>
+
+    <section class="step" aria-labelledby="h-detail" id="detail-step">
+      <h2 id="h-detail"><span class="n">5</span>Boden &amp; Wände</h2>
+      <div id="floor-row">
+        <h3>Boden</h3>
+        <div class="chips" id="floors"></div>
+      </div>
+      <div id="wall-row">
+        <h3>Wandfarbe</h3>
+        <div class="paints" id="walls"></div>
+      </div>
+    </section>
+
+    <section class="step" aria-labelledby="h-prompt">
+      <h2 id="h-prompt"><span class="n">6</span>In Gemini einfügen</h2>
+      <p class="sum" id="summary"></p>
+      <textarea id="prompt" readonly rows="7" aria-label="Prompt für Gemini"></textarea>
+      <div class="actions">
+        <button id="copy-btn" type="button">Prompt kopieren</button>
+        <a class="button secondary" href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini öffnen</a>
+      </div>
+      <ol class="how">
+        <li>Prompt kopieren und Gemini öffnen.</li>
+        <li>Dort dein Raumfoto anhängen, den Prompt einfügen und senden.</li>
+        <li>Gefällt es dir nicht, tippe in Gemini auf „Nochmal“.</li>
+      </ol>
+    </section>
+
+    <section class="step" aria-labelledby="h-compare">
+      <h2 id="h-compare"><span class="n">7</span>Vorher &amp; nachher</h2>
+      <p class="hint">Bild in Gemini lange drücken und sichern, dann hier auswählen.</p>
+      <label class="button secondary" for="result-input">Gemini-Bild auswählen
+        <input id="result-input" type="file" accept="image/*" hidden>
+      </label>
+      <div class="compare" id="compare" hidden>
+        <img id="cmp-after" alt="Nachher">
+        <img id="cmp-before" alt="Vorher">
+        <span class="tag tag-l">vorher</span><span class="tag tag-r">nachher</span>
+        <input id="cmp-range" type="range" min="0" max="100" value="50" aria-label="Vorher-nachher-Regler">
+      </div>
+      <p class="hint" id="compare-note" hidden>Zum Speichern das Bild lange drücken.</p>
+    </section>
+
+    <section class="step" aria-labelledby="h-history" id="history-step" hidden>
+      <h2 id="h-history">Zuletzt</h2>
+      <div id="history"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="src/core.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

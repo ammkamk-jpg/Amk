@@ -7,6 +7,7 @@
     "test": "node --test",
     "build": "node scripts/build-artifact.js",
     "build:damirtrade": "node scripts/build-damirtrade.js",
-    "build:werkbuero": "node scripts/build-werkbuero.js"
+    "build:werkbuero": "node scripts/build-werkbuero.js",
+    "build:homedesign": "node scripts/build-homedesign.js"
   }
 }
