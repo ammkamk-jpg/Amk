@@ -47,6 +47,23 @@
     return 'none';
   }
 
+  // ---------- human-like randomness ----------
+  // Gap between searches: base x 0.8-1.4 (bell-shaped, never the same twice), and now and then
+  // (8%) a longer pause of 1.5-5s, like someone glancing away.
+  function humanGapMs(base, rnd) {
+    rnd = rnd || Math.random;
+    var ms = base * (0.8 + 0.6 * (rnd() + rnd()) / 2);
+    if (rnd() < 0.08) ms += 1500 + rnd() * 3500;
+    return Math.round(ms);
+  }
+  // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
+  function fuzzyCount(n, spread, rnd) {
+    rnd = rnd || Math.random;
+    return Math.max(1, Math.round(n * (1 - spread + 2 * spread * rnd())));
+  }
+  // Special cards' ids are the base player id + k * 2^24; the market search wants the base id.
+  function baseIdOf(id) { id = Number(id); return id > 0 ? id % 16777216 : 0; }
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, humanGapMs: humanGapMs, fuzzyCount: fuzzyCount, baseIdOf: baseIdOf };
   }

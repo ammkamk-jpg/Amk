@@ -4,6 +4,38 @@
   // A step worth seeing: on screen (activity line + log) and in the console.
   function say(m) { log(m); setActivity(m); try { console.log('[FUT Snipe] ' + m); } catch (e) {} }
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
+  // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Clears itself
+  // after ~20 lines (the bot pauses briefly meanwhile, see afterFeedLine).
+  var feedLines = [], feedLimit = 20, feedClearing = false;
+  function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
+  function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
+  // quiet = already written to the console by say().
+  function feed(text, kind, quiet) {
+    var l = { text: text, kind: kind || 'miss', time: clock() };
+    feedLines.unshift(l);
+    if (!quiet) try { console.log('[FUT Snipe] ' + text + '  ' + l.time); } catch (e) {}
+    var boxes = document.querySelectorAll('.fs-feed');
+    for (var i = 0; i < boxes.length; i++) { if (boxes[i].classList.contains('clearing')) continue; boxes[i].insertAdjacentHTML('afterbegin', feedHTML(l)); while (boxes[i].children.length > 30) boxes[i].removeChild(boxes[i].lastChild); }
+  }
+  function feedFull() { return feedLines.length >= feedLimit; }
+  function clearFeed(instant) {
+    feedLines = []; feedLimit = rand(18, 24);
+    var boxes = document.querySelectorAll('.fs-feed'), i;
+    if (instant) { for (i = 0; i < boxes.length; i++) boxes[i].innerHTML = ''; return Promise.resolve(); }
+    feedClearing = true; setTidy('clearing the list · short pause…');
+    for (i = 0; i < boxes.length; i++) {
+      boxes[i].classList.add('clearing');
+      var kids = boxes[i].children; for (var k = 0; k < kids.length; k++) kids[k].style.animationDelay = (k * 30) + 'ms';
+    }
+    return sleep(900).then(function () {
+      var bx = document.querySelectorAll('.fs-feed');
+      for (var j = 0; j < bx.length; j++) { bx[j].classList.remove('clearing'); bx[j].innerHTML = ''; }
+      feedClearing = false; setTidy('');
+    });
+  }
+  function setTidy(m) { var t = document.querySelectorAll('.fs-tidy'); for (var i = 0; i < t.length; i++) t[i].textContent = m; }
+  function fillFeeds() { var html = feedLines.map(feedHTML).join(''), b = document.querySelectorAll('.fs-feed'); for (var i = 0; i < b.length; i++) if (!b[i].children.length && html) b[i].innerHTML = html; }
+
   function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
   function fmtk(n) { return n == null ? '—' : (Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1e4 ? Math.round(n / 1e3) + 'k' : fmt(n)); }
   function signed(n) { return n == null ? '—' : (n > 0 ? '+' + fmtk(n) : fmtk(n)); }
@@ -29,11 +61,14 @@
         '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
       '</div><div class="fs-life" id="fs-life"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
-      '<div id="fs-act"></div>' +
+      '<div id="fs-act"></div><div class="fs-tidy"></div><div class="fs-feed"></div>' +
+      '<button class="fs-btn" id="fs-club" style="margin-top:11px;background:#1b2838;color:#f3c969">💰 Price club cards<span class="sub">open your Club first · price-checks every card on screen that has no tag yet (max 25)</span></button>' +
       '<div class="fs-rows" style="margin-top:11px">' +
         row('🎯', 'Target profit / card', 'minProfit') +
         segRow('⏳', 'List for', 'listDur', LIST_DURS) +
         swRow('🧾', 'Auto-relist after buy', 'autoList') +
+        swRow('♻️', 'Relist expired cards', 'relistExpired') +
+        sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
         swRow('🏷️', 'Price tags on cards', 'badges') +
         segRow('🏎️', 'Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]]) +
         '<div class="fs-hint" id="fs-speedhint">' + speedHint() + '</div>' +
@@ -47,7 +82,7 @@
         '<div class="c"><div class="l">Cheapest now</div><div class="v c" id="fs-cheap">—</div></div>' +
       '</div></div></details>' +
       '<details class="fs-sec"><summary>Limits</summary><div class="fs-rows" style="margin-top:8px">' +
-        row('🔁', 'Re-check price every (searches)', 'reprobeEvery') + row('🛑', 'Session buy cap', 'sessionBuyCap') +
+        row('🛑', 'Session buy cap', 'sessionBuyCap') +
         row('📅', 'Daily buy cap', 'dailyBuyCap') + row('⏱️', 'Run minutes (0=∞)', 'runMinutes') +
       '</div></details>' +
       '<div id="fs-status"></div><pre id="fs-log"></pre>';
@@ -104,6 +139,7 @@
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
+      '<div class="fs-tidy"></div><div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
     document.body.appendChild(lock);
     lock.addEventListener('touchmove', function (ev) { ev.preventDefault(); }, { passive: false });
@@ -125,6 +161,7 @@
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else start(); break;
+        case 'fs-club': if (running) stopAll(); else startClubPricing(); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
@@ -145,7 +182,7 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'club' ? 'Pricing your cards on screen — tags appear as they finish.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -159,7 +196,7 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
     // body (only rebuild on tab change to keep inputs usable)
     var body = $('fs-body');
-    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : snipeView(); }
+    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : snipeView(); fillFeeds(); }
     $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
     if (tab !== 'snipe') return;
 
@@ -190,8 +227,11 @@
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
+    var club = $('fs-club');
+    if (club) { var ch = running && mode === 'club' ? '■ Stop pricing<span class="sub">priced cards keep their tags</span>' : '💰 Price club cards<span class="sub">open your Club first · price-checks every card on screen that has no tag yet (max 25)</span>'; if (club.__html !== ch) { club.__html = ch; club.innerHTML = ch; } club.style.display = running && mode !== 'club' ? 'none' : ''; }
+    if (go) go.style.display = running && mode === 'club' ? 'none' : '';
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'pricing' ? 'Pricing club cards…' : phase === 'tidy' ? 'Short pause…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
       $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
     }
   }

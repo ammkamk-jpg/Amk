@@ -47,3 +47,17 @@
     } catch (e) {}
     if (badgeObs) { try { badgeObs.observe(document.body, { childList: true, subtree: true }); } catch (e) {} }
   }
+  // Card ids on screen that have no price yet (for "Price club cards").
+  function unpricedCardIds(max) {
+    var out = [], seen = {};
+    try {
+      var rows = document.querySelectorAll(ROW_SEL);
+      for (var i = 0; i < rows.length && out.length < max; i++) {
+        var row = rows[i], art = row.querySelector('.ut-item-view, .cardView, .playerCard, .entityContainer, .player') || row;
+        var ids = cardIds(row).concat(cardIds(art)), id = null, priced = false;
+        for (var k = 0; k < ids.length; k++) { if (cachedPrice(ids[k])) priced = true; if (id == null && Number(ids[k]) > 0) id = ids[k]; }
+        if (id != null && !priced && !seen[id]) { seen[id] = 1; out.push(id); }
+      }
+    } catch (e) {}
+    return out;
+  }

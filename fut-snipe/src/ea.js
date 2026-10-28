@@ -29,8 +29,8 @@
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
   function buildCriteria(maxBuy) {
     var out;
-    if (capturedCriteria) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
-    else { var C = ctor(); var src = capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
+    if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
+    else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
     try { out.minBuy = 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
@@ -74,7 +74,11 @@
           if (!ok) return finish({ ok: false, items: [], err: classify(resp) });
           if (raw.length && !sampleKeys.length) { try { sampleKeys = Object.keys(raw[0]); samplePrice = priceOf(raw[0]); } catch (e) {} }
           var items = [];
-          for (var i = 0; i < raw.length; i++) { var p = priceOf(raw[i]); if (p > 0) items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) }); }
+          for (var i = 0; i < raw.length; i++) {
+            var p = priceOf(raw[i]); if (!(p > 0)) continue;
+            if (matchId != null && String(defIdOf(raw[i])) !== String(matchId)) continue; // club pricing: only this exact card version
+            items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
+          }
           items.sort(function (a, b) { return a.p - b.p; });
           if (items.length) { curName = nameOf(items[0].it) || curName; stats.curDefId = defIdOf(items[0].it) || stats.curDefId; }
           finish({ ok: true, items: items });
@@ -92,6 +96,11 @@
   }
   function moveToTransfer(item) { return new Promise(function (res) { try { var P = window.ItemPile && window.ItemPile.TRANSFER; if (P == null || !svc().Item.move) return res(false); svc().Item.move(item, P).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function listItem(item, start, buyNow, dur) { return new Promise(function (res) { try { if (!svc().Item.list) return res(false); svc().Item.list(item, start, buyNow, dur).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { return res(false); } }); }
+
+  // Transfer list: expired (unsold) cards, and EA's own "Re-list all" (same price + duration as before).
+  function isExpired(it) { try { var a = it._auction || {}; return a.tradeState === 'expired' || (it.getAuctionData && it.getAuctionData().isExpired && it.getAuctionData().isExpired()); } catch (e) { return false; } }
+  function transferItems() { return new Promise(function (res) { try { if (!svc().Item.requestTransferItems) return res(null); svc().Item.requestTransferItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 
   // Every transfer-market response the web app gets (yours or the bot's) feeds the price tags:
   // cheapest Buy Now seen per card. Also stops the bot on a 429.

@@ -60,3 +60,24 @@ test("probeMid stays on valid prices and stops when lo/hi are neighbours", () =>
   const m = P.probeMid(9900, 10250);
   assert.ok(m > 9900 && m < 10250 && m === P.floorStep(m));
 });
+
+test("search gaps are never the same and stay in a human range", () => {
+  const gaps = Array.from({ length: 500 }, () => P.humanGapMs(2500));
+  assert.ok(new Set(gaps).size > 400, "varied");
+  assert.ok(Math.min(...gaps) >= 2000, `min ${Math.min(...gaps)}`);
+  assert.ok(Math.max(...gaps) <= 2500 * 1.4 + 5000, `max ${Math.max(...gaps)}`);
+  assert.ok(gaps.some((g) => g > 2500 * 1.4), "sometimes a longer pause");
+});
+
+test("fuzzy counts: 50 +/- 20% -> 40..60, and not always the same", () => {
+  const n = Array.from({ length: 200 }, () => P.fuzzyCount(50, 0.2));
+  assert.ok(Math.min(...n) >= 40 && Math.max(...n) <= 60);
+  assert.ok(new Set(n).size > 10);
+  assert.equal(P.fuzzyCount(1, 0.5, () => 0), 1);
+});
+
+test("special card ids map to the base player id", () => {
+  assert.equal(P.baseIdOf(231747), 231747);
+  assert.equal(P.baseIdOf(50563467), 50563467 % 16777216);
+  assert.equal(P.baseIdOf(3 * 16777216 + 231819), 231819);
+});
