@@ -143,4 +143,5 @@
   }
 
   function stopAll() { requestStop('stopped by you'); }
-  function resetLife() { life = { bought: 0, spent: 0, est: 0 }; saveLife(); render(); }
+  // Keeps lastBlock: the safety assistant still needs to know when EA last flagged you.
+  function resetLife() { life = { bought: 0, spent: 0, est: 0, searches: 0, lastBlock: life.lastBlock || null }; saveLife(); sessions = []; lsSet(SESS_KEY, sessions); }

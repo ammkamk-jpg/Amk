@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.3.0
+// @version      3.3.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.3.0';
+  var VERSION = '3.3.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -517,7 +517,8 @@
   }
 
   function stopAll() { requestStop('stopped by you'); }
-  function resetLife() { life = { bought: 0, spent: 0, est: 0 }; saveLife(); render(); }
+  // Keeps lastBlock: the safety assistant still needs to know when EA last flagged you.
+  function resetLife() { life = { bought: 0, spent: 0, est: 0, searches: 0, lastBlock: life.lastBlock || null }; saveLife(); sessions = []; lsSet(SESS_KEY, sessions); }
 
   // ---------- Hub: transfer list overview, real profit, re-priced relisting, pack pulls ----------
   var hub = { at: 0, total: 0, sold: 0, soldValue: 0, active: 0, expired: 0, unlisted: 0, packs: null, packsTradable: 0, busy: '' };
@@ -1173,7 +1174,7 @@
       '<div class="fs-card"><div class="fs-ch">Totals (last ' + sessions.length + ' sessions)</div><div class="fs-cols">' +
         '<div class="c"><div class="l">Sessions</div><div class="v">' + sessions.length + '</div></div>' +
         '<div class="c"><div class="l">Bought</div><div class="v">' + fmtk(totBuys) + '</div></div>' +
-        '<div class="c"><div class="l">Est. profit</div><div class="v g">' + signed(totEst) + '</div></div>' +
+        '<div class="c"><div class="l">Est. profit</div><div class="v ' + (totEst < 0 ? 'r' : 'g') + '">' + signed(totEst) + '</div></div>' +
       '</div></div>' +
       '<div class="fs-ch" style="padding:2px 2px 8px">Session history</div>' + rows +
       '<div class="fs-mini"><button id="fs-clearsess">Clear history</button><button id="fs-reset2">Reset all-time</button></div>';
@@ -1219,6 +1220,9 @@
     };
     fab.addEventListener('pointerup', end); fab.addEventListener('pointercancel', end);
   }
+
+  // Tabs are only rebuilt when you switch tab; after changing what a tab shows, rebuild it now.
+  function redrawTab() { var b = document.getElementById('fs-body'); if (b) b.removeAttribute('data-tab'); render(); }
 
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
@@ -1271,8 +1275,8 @@
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
-        case 'fs-clearsess': sessions = []; lsSet(SESS_KEY, sessions); render(); break;
-        case 'fs-reset2': resetLife(); break;
+        case 'fs-clearsess': if (window.confirm('Clear the session history?')) { sessions = []; lsSet(SESS_KEY, sessions); redrawTab(); } break;
+        case 'fs-reset2': if (window.confirm('Reset all-time stats and session history? This can’t be undone.')) { resetLife(); redrawTab(); } break;
         case 'fs-h-refresh': hubRefreshButton(); break;
         case 'fs-h-more': hubShowAll = !hubShowAll; render(); break;
         case 'fs-h-clear': hubClearButton(); break;
@@ -1331,7 +1335,7 @@
     if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
     if ($('fs-cheap')) $('fs-cheap').textContent = stats.cheapest != null ? fmt(stats.cheapest) : '—';
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
-    if ($('fs-s-est')) $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—';
+    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = 'v ' + (stats.est < 0 ? 'r' : 'g'); }
     var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : ''); }
     if ($('fs-life')) $('fs-life').textContent = 'All-time: ' + fmtk(life.bought) + ' bought · est profit ' + signed(life.est);
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
