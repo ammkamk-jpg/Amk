@@ -33,28 +33,7 @@
   function saveLife() { lsSet(LIFE_KEY, life); }
   var life = loadLife();
 
-  // Live Filters (saved search sets) + Stats (session history) + price cache (per card id).
+  // Live Filters (saved search sets) + Stats (session history).
   var filters = lsGet(FILT_KEY, []);     // [{name, crit}]
   var sessions = lsGet(SESS_KEY, []);     // [{t, buys, spent, est, net}]
-  var priceCache = lsGet(PRICE_KEY, {}); // { id: {price, t, checked} }
-  var CHECKED_WINS_MS = 15 * 60000, PRICE_TTL_MS = 6 * 3600000, PRICE_CACHE_MAX = 800;
-  // checked = from the bot's price check. A recent checked price beats a plain "cheapest seen".
-  function cachePrice(id, p, checked) {
-    if (id == null || !(p > 0)) return;
-    var k = String(id), old = priceCache[k], now = Date.now();
-    if (!checked && old && old.checked && now - old.t < CHECKED_WINS_MS) return;
-    priceCache[k] = { price: p, t: now, checked: !!checked };
-  }
-  var cacheSaveTimer = null;
-  function saveCacheSoon() {
-    if (cacheSaveTimer) return;
-    cacheSaveTimer = setTimeout(function () {
-      cacheSaveTimer = null;
-      var keys = Object.keys(priceCache), now = Date.now();
-      keys.forEach(function (k) { if (now - priceCache[k].t > PRICE_TTL_MS) delete priceCache[k]; });
-      keys = Object.keys(priceCache);
-      if (keys.length > PRICE_CACHE_MAX) keys.sort(function (a, b) { return priceCache[a].t - priceCache[b].t; }).slice(0, keys.length - PRICE_CACHE_MAX).forEach(function (k) { delete priceCache[k]; });
-      lsSet(PRICE_KEY, priceCache);
-    }, 1000);
-  }
-  function cachedPrice(id) { var r = id != null && priceCache[String(id)]; return r && Date.now() - r.t < PRICE_TTL_MS ? r.price : null; }
+  try { localStorage.removeItem(PRICE_KEY); } catch (e) {} // old per-card price cache, no longer used

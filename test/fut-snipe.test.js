@@ -76,8 +76,12 @@ test("fuzzy counts: 50 +/- 20% -> 40..60, and not always the same", () => {
   assert.equal(P.fuzzyCount(1, 0.5, () => 0), 1);
 });
 
-test("special card ids map to the base player id", () => {
-  assert.equal(P.baseIdOf(231747), 231747);
-  assert.equal(P.baseIdOf(50563467), 50563467 % 16777216);
-  assert.equal(P.baseIdOf(3 * 16777216 + 231819), 231819);
+test("coin labels from EA's card rows", () => {
+  assert.equal(P.parseCoins("61.3K"), 61300);
+  assert.equal(P.parseCoins("7.7K"), 7700);
+  assert.equal(P.parseCoins("1.25M"), 1250000);
+  assert.equal(P.parseCoins("7,750"), 7750);
+  assert.equal(P.parseCoins(" 850 "), 850);
+  assert.equal(P.parseCoins("--"), null);
+  assert.equal(P.parseCoins(null), null);
 });

@@ -62,7 +62,6 @@
       '</div><div class="fs-life" id="fs-life"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div><div class="fs-tidy"></div><div class="fs-feed"></div>' +
-      '<button class="fs-btn" id="fs-club" style="margin-top:11px;background:#1b2838;color:#f3c969">💰 Price club cards<span class="sub">open your Club first · price-checks every card on screen that has no tag yet (max 25)</span></button>' +
       '<div class="fs-rows" style="margin-top:11px">' +
         row('🎯', 'Target profit / card', 'minProfit') +
         segRow('⏳', 'List for', 'listDur', LIST_DURS) +
@@ -119,6 +118,36 @@
       '<div class="fs-mini"><button id="fs-clearsess">Clear history</button><button id="fs-reset2">Reset all-time</button></div>';
   }
 
+  // The ⚡ button can be dragged anywhere (so it never covers e.g. the Club tile); the spot is remembered.
+  var FAB_KEY = 'futSnipe.fab.v1', fabDraggedAt = 0;
+  function placeFab(fab, x, y) {
+    var w = window.innerWidth || 390, h = window.innerHeight || 700, size = 58;
+    x = Math.min(Math.max(6, x), w - size - 6); y = Math.min(Math.max(6, y), h - size - 6);
+    fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.style.right = 'auto'; fab.style.bottom = 'auto';
+  }
+  function makeFabDraggable(fab) {
+    var saved = lsGet(FAB_KEY, null), drag = null;
+    if (saved && saved.x != null) placeFab(fab, saved.x, saved.y);
+    window.addEventListener('resize', function () { var r = fab.getBoundingClientRect(); if (fab.style.left) placeFab(fab, r.left, r.top); });
+    fab.addEventListener('pointerdown', function (e) {
+      var r = fab.getBoundingClientRect(); drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false };
+      try { fab.setPointerCapture(e.pointerId); } catch (x) {}
+    });
+    fab.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 8) return; // a tap, not a drag
+      drag.moved = true; fab.classList.add('drag'); e.preventDefault();
+      placeFab(fab, drag.l + dx, drag.t + dy);
+    });
+    var end = function () {
+      fab.classList.remove('drag'); // before measuring: the drag look scales the button
+      if (drag && drag.moved) { lsSet(FAB_KEY, { x: parseInt(fab.style.left, 10), y: parseInt(fab.style.top, 10) }); fabDraggedAt = Date.now(); }
+      drag = null;
+    };
+    fab.addEventListener('pointerup', end); fab.addEventListener('pointercancel', end);
+  }
+
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
@@ -131,8 +160,9 @@
       '</div><div id="fs-body"></div>';
     document.body.appendChild(el);
     var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '⚡<span class="dot"></span>';
-    fab.onclick = function () { el.classList.add('open'); fab.style.display = 'none'; render(); };
+    fab.onclick = function () { if (Date.now() - fabDraggedAt < 400) return; el.classList.add('open'); fab.style.display = 'none'; render(); };
     document.body.appendChild(fab);
+    makeFabDraggable(fab);
 
     var lock = document.createElement('div'); lock.id = 'fs-lock';
     lock.innerHTML = '<div class="spin"></div><div class="lbig">⚡ FUT Snipe running</div>' +
@@ -161,7 +191,6 @@
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else start(); break;
-        case 'fs-club': if (running) stopAll(); else startClubPricing(); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
         case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
@@ -182,7 +211,7 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'club' ? 'Pricing your cards on screen — tags appear as they finish.' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -227,11 +256,8 @@
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
-    var club = $('fs-club');
-    if (club) { var ch = running && mode === 'club' ? '■ Stop pricing<span class="sub">priced cards keep their tags</span>' : '💰 Price club cards<span class="sub">open your Club first · price-checks every card on screen that has no tag yet (max 25)</span>'; if (club.__html !== ch) { club.__html = ch; club.innerHTML = ch; } club.style.display = running && mode !== 'club' ? 'none' : ''; }
-    if (go) go.style.display = running && mode === 'club' ? 'none' : '';
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'pricing' ? 'Pricing club cards…' : phase === 'tidy' ? 'Short pause…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'tidy' ? 'Short pause…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
       $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
     }
   }

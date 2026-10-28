@@ -29,8 +29,8 @@
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
   function buildCriteria(maxBuy) {
     var out;
-    if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
-    else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
+    if (capturedCriteria) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
+    else { var C = ctor(); var src = capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
     try { out.minBuy = 0; out.minBid = 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
@@ -76,7 +76,6 @@
           var items = [];
           for (var i = 0; i < raw.length; i++) {
             var p = priceOf(raw[i]); if (!(p > 0)) continue;
-            if (matchId != null && String(defIdOf(raw[i])) !== String(matchId)) continue; // club pricing: only this exact card version
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
@@ -102,19 +101,7 @@
   function transferItems() { return new Promise(function (res) { try { if (!svc().Item.requestTransferItems) return res(null); svc().Item.requestTransferItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 
-  // Every transfer-market response the web app gets (yours or the bot's) feeds the price tags:
-  // cheapest Buy Now seen per card. Also stops the bot on a 429.
-  function recordMarketPrices(body) {
-    var data; try { data = typeof body === 'string' ? JSON.parse(body) : body; } catch (e) { return; }
-    var list = data && data.auctionInfo; if (!list || !list.length) return;
-    var min = {};
-    list.forEach(function (a) {
-      var d = a && a.itemData, p = a && a.buyNowPrice; if (!d || !(p > 0)) return;
-      [d.resourceId, d.assetId].forEach(function (id) { if (id != null && (!(id in min) || p < min[id])) min[id] = p; });
-    });
-    for (var id in min) cachePrice(id, min[id], false);
-    saveCacheSoon(); paintBadges();
-  }
+  // Remembers the user's market searches (URL) and stops the bot on a 429.
   (function hookXHR() {
     var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function (m, u) { this.__m = m; this.__u = u; return open.apply(this, arguments); };
@@ -125,7 +112,6 @@
           if (/transfermarket\?/i.test(u) && get) {
             tmUrls.unshift(u); tmUrls = tmUrls.slice(0, 5);
             if (!running) { var c = criteriaFromUrl(u); if (c) { capturedFromUrl = c; render(); } } // the bot's own searches don't count
-            if (self.status === 200) recordMarketPrices(self.responseType === 'json' ? self.response : self.responseText);
           }
           if (/transfermarket|\/trade/i.test(u) && self.status === 429) { var r = self.getResponseHeader && self.getResponseHeader('Retry-After'); requestStop('EA soft-ban (429)' + (r ? ', retry after ' + r + 's' : '') + ' — wait, then restart'); }
         } catch (e) {}

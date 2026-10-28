@@ -6,7 +6,7 @@
       sessions = sessions.slice(0, 60); lsSet(SESS_KEY, sessions);
     }
   }
-  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; searchBase = null; matchId = null; recordSession(); say('STOP: ' + reason); feed(reason, 'stop', true); render(); }
+  function requestStop(reason) { if (!running) return; running = false; phase = 'idle'; stopReason = reason; recordSession(); say('STOP: ' + reason); feed(reason, 'stop', true); render(); }
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never exactly the same, sometimes a longer pause).
@@ -17,7 +17,7 @@
     var r = await doSearch(maxBuy); if (!running) return null;
     stats.searches++; stats.sinceBreak++;
     if (!r.ok) { if ((r.err || {}).stop) { requestStop(r.err.msg); return null; } log('search: ' + ((r.err || {}).msg || '—')); }
-    if (!gotRange && r.items.length && mode === 'snipe') { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
+    if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
     return r;
   }
   // After ~20 lines the feed clears itself; the bot takes a short pause while it does.
@@ -26,7 +26,7 @@
     phase = 'tidy'; render();
     await clearFeed();
     await wait(rand(2000, 5000));
-    if (running) phase = mode === 'club' ? 'pricing' : 'running'; render();
+    if (running) phase = 'running'; render();
   }
   // Long breaks every ~breakEvery searches (the exact number changes every time).
   async function maybeBreak() {
@@ -46,7 +46,7 @@
     var r = await search(0); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check'); await afterFeedLine();
     if (!r.ok || !r.items.length) return null;
-    var lo = mode === 'snipe' && stats.eaMin > 0 ? Math.max(0, stats.eaMin - stepFor(stats.eaMin)) : 0, hi = r.items[r.items.length - 1].p, hiItems = null, few = null;
+    var lo = stats.eaMin > 0 ? Math.max(0, stats.eaMin - stepFor(stats.eaMin)) : 0, hi = r.items[r.items.length - 1].p, hiItems = null, few = null;
     if (probeVerdict(asListings(r.items)) === 'few') few = r.items; // tiny market: the unfiltered search already is "a few"
     for (var tries = 0; !few && tries < 14 && running; tries++) {
       var mid = probeMid(lo, hi); if (!mid) break;
@@ -76,7 +76,6 @@
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(pick.price) + ' card'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    cachePrice(stats.curDefId, pick.price, true); saveCacheSoon(); paintBadges();
     say('Price ' + searchLabel() + ': ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh listings)') + ' -> snipe <= ' + fmt(sp) + ', list ' + fmt(pick.price) + ', +' + fmt(profitAt(pick.price, sp)) + '/card');
     feed('Price ' + fmt(pick.price) + ' → snipe ≤ ' + fmt(sp), 'price', true);
     phase = 'running'; render();
@@ -159,28 +158,5 @@
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
 
-  // Club prices: price check every card on screen that has no price tag yet (max 25 per run).
-  async function clubLoop(ids) {
-    var done = 0;
-    for (var i = 0; i < ids.length && running; i++) {
-      mode = 'club'; phase = 'pricing'; curName = null;
-      searchBase = { type: 'player', maskedDefId: baseIdOf(ids[i]), count: 21 }; matchId = ids[i];
-      setActivity('Pricing card ' + (i + 1) + ' of ' + ids.length + '…'); render();
-      var pick = await findPrice(); if (!running) break;
-      if (pick) { cachePrice(ids[i], pick.price, true); saveCacheSoon(); paintBadges(); done++; feed(searchLabel() + ' ≈ ' + fmt(pick.price), 'price'); }
-      else feed(searchLabel() + ' · not on the market', 'miss');
-      await afterFeedLine(); await maybeBreak();
-    }
-    searchBase = null; matchId = null;
-    if (running) requestStop('club priced: ' + done + ' of ' + ids.length + ' cards');
-  }
-  function startClubPricing() {
-    if (!canStart()) return;
-    var ids = unpricedCardIds(25);
-    if (!ids.length) { blockMsg = 'Open your Club (or any card list) first. Cards that already have a price tag are skipped.'; render(); return; }
-    running = true; mode = 'club'; phase = 'pricing';
-    say('Pricing ' + ids.length + ' cards on screen…');
-    render(); clubLoop(ids).catch(function (e) { requestStop('pricing error: ' + e); });
-  }
   function stopAll() { requestStop('stopped by you'); }
   function resetLife() { life = { bought: 0, spent: 0, est: 0 }; saveLife(); render(); }
