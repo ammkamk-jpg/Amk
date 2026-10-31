@@ -44,7 +44,10 @@ const body = parts.map((p) => read(`fut-snipe/src/${p}.js`).replace(/\s+$/, ""))
 const assetDir = path.join(root, "fut-snipe/assets/mascot");
 if (fs.existsSync(path.join(assetDir, "idle.webp"))) {
   const b64 = (f) => fs.readFileSync(path.join(assetDir, f)).toString("base64");
-  const PACK_VERSION = "2.1.0";
+  // Short lines: Safari can't display a multi-megabyte single line, and then the Userscripts
+  // "Install" button never appears. The pieces are joined back together when the pack runs.
+  const lines = (str) => "[\n" + (str.match(/.{1,1000}/g) || [""]).map((c) => JSON.stringify(c)).join(",\n") + "\n].join(\"\")";
+  const PACK_VERSION = "2.2.0";
   const packRaw = "https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/tangatolga-mascot.user.js";
   const pack = `// ==UserScript==
 // @name         TangaTolga Mascot
@@ -61,13 +64,13 @@ if (fs.existsSync(path.join(assetDir, "idle.webp"))) {
 // @updateURL    ${packRaw}
 // ==/UserScript==
 // GENERATED FILE: from fut-snipe/assets/mascot/ by \`npm run build:fut-snipe\`.
-window.__ttMascot = ${JSON.stringify({
-    idle: "data:image/webp;base64," + b64("idle.webp"),
-    win: "data:image/webp;base64," + b64("win.webp"),
-    sad: "data:image/webp;base64," + b64("sad.webp"),
-    winMp3: b64("win.mp3"),
-    sadMp3: fs.existsSync(path.join(assetDir, "sad.mp3")) ? b64("sad.mp3") : "", // optional: a silent pout is fine
-  })};
+window.__ttMascot = {
+  idle: ${lines("data:image/webp;base64," + b64("idle.webp"))},
+  win: ${lines("data:image/webp;base64," + b64("win.webp"))},
+  sad: ${lines("data:image/webp;base64," + b64("sad.webp"))},
+  winMp3: ${lines(b64("win.mp3"))},
+  sadMp3: ${lines(fs.existsSync(path.join(assetDir, "sad.mp3")) ? b64("sad.mp3") : "")}
+};
 `;
   fs.writeFileSync(path.join(root, "tangatolga-mascot.user.js"), pack);
   console.log(`TangaTolga Mascot pack -> tangatolga-mascot.user.js v${PACK_VERSION} (${(pack.length / 1048576).toFixed(1)} MB)`);
