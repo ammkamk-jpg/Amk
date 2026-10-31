@@ -119,10 +119,10 @@
         rangeSetting('Wallpaper dim', 'wallDim', 20, 85, 5, '%', 'Darker = easier to read.') +
         rangeSetting('Wallpaper blur', 'wallBlur', 0, 20, 1, 'px', '') +
         setting('Wallpaper on the running screen', ctlSw('wallRun'), '') +
-        (typeof MASCOT_ASSETS === 'object' && MASCOT_ASSETS ? setting('Mascot', ctlSw('mascot'), 'She idles on the running screen, cheers \u201cuwuuu~\u201d on every snipe and pouts when the bot stops.') +
+        (setting('Mascot', ctlSw('mascot'), mascotPack() ? 'She idles on the running screen, cheers \u201cuwuuu~\u201d on every snipe and pouts when the bot stops.' : 'Install the \u201cTangaTolga Mascot\u201d pack (a second script, once) to see her: open its link in Safari \u2192 \u1d00A \u2192 Userscripts \u2192 Install, then reload.') +
           segSetting('Mascot size', 'mascotSize', MASCOT_SIZES, '') +
           setting('Mascot voice', ctlSw('mascotVoice'), 'On iPhone, sound starts working after you tap Start (or the test button).') +
-          '<button class="fs-more" id="fs-mascot-test">💖 Test her</button>' : '') +
+          '<button class="fs-more" id="fs-mascot-test">💖 Test her</button>') +
         setting('Falling petals', ctlSw('petals'), 'Cherry blossoms drifting in the background, in the theme\u2019s colours.')) +
       section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the sell price minus tax minus this, rounded down to EA’s price steps.') +
@@ -456,7 +456,9 @@
   }
 
   setInterval(function () { if ((tab === 'hub' || tab === 'market') && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
+  var packSeen = false;
   function boot(tries) {
+    if (!packSeen && mascotPack()) { packSeen = true; if (document.getElementById('fs-lock')) applyLook(); } // the pack script may load after the bot
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
     if ((tries || 0) < 180) setTimeout(function () { boot((tries || 0) + 1); }, 1000);

@@ -1,15 +1,17 @@
   // ---------- mascot: an animated character that idles on the running screen and reacts ----------
-  // MASCOT_ASSETS is filled in by the build from fut-snipe/assets/mascot/ (transparent animated
-  // WebPs + mp3 voice clips, all embedded, so nothing loads from another server).
-  var MASCOT_SIZES = [['S', 120], ['M', 160], ['L', 210]];
+  // Her animations come from the separate "TangaTolga Mascot" pack script (tangatolga-mascot.user.js,
+  // installed once): full-resolution transparent animated WebPs + mp3 voice clips, set as
+  // window.__ttMascot. Keeping them out of the bot keeps its updates small.
+  var MASCOT_SIZES = [['S', 200], ['M', 260], ['L', 320], ['XL', 400]];
+  function mascotPack() { var p = window.__ttMascot; return p && p.idle ? p : null; }
   var mascotVoices = {}, mascotTimer = null, mascotN = 0, mascotBroken = false;
-  function mascotOn() { return !!(cfg.mascot && typeof MASCOT_ASSETS === 'object' && MASCOT_ASSETS && !mascotBroken); }
+  function mascotOn() { return !!(cfg.mascot && mascotPack() && !mascotBroken); }
   // A unique #fragment makes the browser start a play-once animation from its first frame again.
-  function mascotSrc(kind) { return MASCOT_ASSETS[kind] + '#' + (++mascotN); }
-  function mascotIdleHTML() { return mascotOn() ? '<div class="tt-mascot"><img alt="" src="' + MASCOT_ASSETS.idle + '"></div>' : '<div class="radar"></div>'; }
+  function mascotSrc(kind) { return mascotPack()[kind] + '#' + (++mascotN); }
+  function mascotIdleHTML() { return mascotOn() ? '<div class="tt-mascot"><img alt="" src="' + mascotPack().idle + '"></div>' : '<div class="radar"></div>'; }
 
   function mascotVoice(kind) {
-    var b64 = MASCOT_ASSETS && MASCOT_ASSETS[kind + 'Mp3'];
+    var b64 = mascotPack() && mascotPack()[kind + 'Mp3'];
     if (!cfg.mascotVoice || !b64 || !audioCtx) return;
     var play = function (buf) { try { var s = audioCtx.createBufferSource(), g = audioCtx.createGain(); g.gain.value = .9; s.buffer = buf; s.connect(g); g.connect(audioCtx.destination); s.start(); } catch (e) {} };
     if (mascotVoices[kind]) return play(mascotVoices[kind]);

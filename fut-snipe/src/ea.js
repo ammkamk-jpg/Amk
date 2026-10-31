@@ -83,6 +83,15 @@
   function rememberLimits(list) {
     (list || []).forEach(function (x) { var l = readLimitsObj(x); if (!l) return; if (x.itemId != null) limitsCache['i' + x.itemId] = l; if (x.defId != null) limitsCache['d' + x.defId] = l; });
   }
+  // EA's reply shape varies (seen: { marketData: ... }): collect every object in it that carries a
+  // min/max price, up to a few levels deep, normalising the id fields.
+  function findLimits(o, depth, out) {
+    if (!o || typeof o !== 'object' || depth > 4) return out;
+    if (Array.isArray(o)) { o.forEach(function (x) { findLimits(x, depth + 1, out); }); return out; }
+    if (readLimitsObj(o)) out.push({ itemId: o.itemId != null ? o.itemId : o.id, defId: o.defId != null ? o.defId : (o.definitionId != null ? o.definitionId : o.resourceId), minPrice: readLimitsObj(o).min, maxPrice: readLimitsObj(o).max });
+    for (var k in o) if (o[k] && typeof o[k] === 'object') findLimits(o[k], depth + 1, out);
+    return out;
+  }
   function cachedLimits(item) { return limitsCache['i' + item.id] || limitsCache['d' + defIdOf(item)] || null; }
   function priceLimits(item) {
     return new Promise(function (res) {
@@ -94,8 +103,11 @@
         svc().Item.requestMarketData(item).observe(OBS, function (s, r) {
           clearTimeout(to);
           try {
-            var d = r && (r.data || r.response); limitsDebug = d ? Object.keys(d).slice(0, 12) : null;
-            if (d) rememberLimits(Array.isArray(d) ? d : (d.itemPriceLimits || d.priceLimits || d.items || [d]));
+            var d = r && (r.data || r.response), found = findLimits(d, 0, []);
+            limitsDebug = { keys: d ? Object.keys(d).slice(0, 12) : null, sample: d ? JSON.stringify(d).slice(0, 400) : null, found: found.length };
+            rememberLimits(found);
+            // one price range in the reply and no ids on it: it's this card's
+            if (found.length === 1 && found[0].itemId == null && found[0].defId == null) { var l1 = readLimitsObj(found[0]); if (l1) limitsCache['i' + item.id] = l1; }
           } catch (e) {}
           var l = cachedLimits(item) || fromItem(); if (l) { limitsCache['i' + item.id] = l; limitsCache['d' + defIdOf(item)] = l; }
           res(l);
