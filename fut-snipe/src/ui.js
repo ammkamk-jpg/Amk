@@ -110,7 +110,17 @@
 
   // ---------- Settings: grouped, each one explained ----------
   function settingsView() {
-    return section('Sniping',
+    return section('Look',
+        segSetting('Theme', 'theme', THEMES.map(function (t, i) { return [t.name, i]; }), 'Sakura = pink anime style with falling cherry blossoms. Neon = pink / cyan.') +
+        '<div class="fs-set"><div class="top"><div class="nm">Wallpaper</div><span class="sv" id="fs-wall-st"></span></div>' +
+          '<div class="fs-wallrow"><button class="pick" id="fs-wall-pick">🖼 Choose a picture</button><button id="fs-wall-rm">Remove</button></div>' +
+          '<input type="file" accept="image/*" id="fs-wall-file" style="display:none">' +
+          '<div class="ds">Any picture from your phone, behind the bot and the running screen. Panels turn to frosted glass so text stays readable.</div></div>' +
+        rangeSetting('Wallpaper dim', 'wallDim', 20, 85, 5, '%', 'Darker = easier to read.') +
+        rangeSetting('Wallpaper blur', 'wallBlur', 0, 20, 1, 'px', '') +
+        setting('Wallpaper on the running screen', ctlSw('wallRun'), '') +
+        setting('Falling petals', ctlSw('petals'), 'Cherry blossoms drifting in the background, in the theme\u2019s colours.')) +
+      section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the sell price minus tax minus this, rounded down to EA’s price steps.') +
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (the checked market price). Set your own and bought cards are listed there; the snipe point follows so your target profit still holds. Also on the Sniper card.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + auto-relist. Transfer list / Unassigned = no price check, you set the buy price below.') +
@@ -193,8 +203,8 @@
     if (pts.length < 2) return '';
     var lo = Math.min.apply(null, pts.concat([0])), hi = Math.max.apply(null, pts.concat([1])), span = hi - lo || 1;
     var xy = pts.map(function (v, i) { return (i * 100 / (pts.length - 1)).toFixed(1) + ',' + (30 - (v - lo) / span * 26).toFixed(1); });
-    return '<defs><linearGradient id="fsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".45"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></linearGradient></defs>' +
-      '<polygon fill="url(#fsg)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" stroke="#22d3ee" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
+    return '<defs><linearGradient id="fsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--tt-a1);stop-opacity:.45"/><stop offset="1" style="stop-color:var(--tt-a1);stop-opacity:0"/></linearGradient></defs>' +
+      '<polygon fill="url(#fsg)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" style="stroke:var(--tt-a1)" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
   }
   function renderHub($) {
     var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
@@ -294,7 +304,7 @@
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
-    el.innerHTML =
+    el.innerHTML = lookLayers() +
       '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tiles">' +
         '<div class="fs-tile" data-tab="snipe"><div class="ti" id="fs-ti-run">▶</div><div class="tl">Sniper</div></div>' +
@@ -309,7 +319,7 @@
     makeFabDraggable(fab);
 
     var lock = document.createElement('div'); lock.id = 'fs-lock';
-    lock.innerHTML = '<div class="radar"></div><div class="lbig">TangaTolga <b>hunting</b></div>' +
+    lock.innerHTML = lookLayers() + '<div class="radar"></div><div class="lbig">TangaTolga <b>hunting</b></div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
@@ -321,24 +331,29 @@
     lock.addEventListener('touchmove', function (ev) { if (!(ev.target.closest && ev.target.closest('.fs-feed'))) ev.preventDefault(); }, { passive: false });
     lock.querySelector('#fs-lstop').onclick = function () { stopAll(); };
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
+    applyLook();
 
     // live label while dragging a slider
-    el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
-    el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
+    el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); if (k === 'wallDim' || k === 'wallBlur') applyLook(); });
+    el.addEventListener('change', function (e) {
+      if (e.target.id === 'fs-wall-file') { pickWallpaper(e.target.files && e.target.files[0]); e.target.value = ''; return; }
+      var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
     el.addEventListener('click', function (e) {
       // closest(): a tap on the subtitle <span> inside a button still counts as that button.
       var tg = e.target && e.target.closest ? e.target.closest('button,[data-tab],[data-sw]') : e.target;
       if (!tg || !el.contains(tg)) return;
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
-      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } if (sw === 'wallRun' || sw === 'petals') applyLook(); save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } if (seg === 'theme') applyLook(); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
         case 'fs-sell': askSellPrice(); break;
+        case 'fs-wall-pick': var fi = document.getElementById('fs-wall-file'); if (fi) fi.click(); break;
+        case 'fs-wall-rm': removeWallpaper(); break;
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
@@ -396,7 +411,7 @@
     var segs = panel.querySelectorAll('[data-seg]'); for (i = 0; i < segs.length; i++) segs[i].className = 'fs-sg' + (Number(segs[i].getAttribute('data-val')) === cfg[segs[i].getAttribute('data-seg')] ? ' on' : '');
     if (tab === 'hub') { renderHub($); var sl = $('fs-h-sessions'), shh = sessionsHTML(); if (sl && sl.__html !== shh) { sl.__html = shh; sl.innerHTML = shh; } return; }
     if (tab === 'market') return renderMarket($);
-    if (tab === 'settings') { if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
+    if (tab === 'settings') { if ($('fs-wall-st')) $('fs-wall-st').textContent = wallData() ? 'set ✓' : 'none'; if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
 
     // Sniper view
     var keep = keepMode(), pr = market.snipe && !keep ? profitAt(listPrice(), market.snipe) : null;

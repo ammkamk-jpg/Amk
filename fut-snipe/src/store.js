@@ -2,7 +2,7 @@
   var LS_KEY = 'futSnipe.settings.v3', LIFE_KEY = 'futSnipe.lifetime.v1';
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
-    minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
+    minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, theme: 1, wallDim: 55, wallBlur: 4, wallRun: 1, petals: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };

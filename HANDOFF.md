@@ -2,7 +2,7 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
-## Status (v4.1.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
+## Status (v4.2.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
 - Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
 - v2.6.0: re-check slider 30-120, randomised gaps/breaks/re-checks, live feed (one line per search, clears after ~20 with a short pause), relists expired transfer-list cards via EA's Re-list all.
 - v2.7.0: real web-app diag showed cards are drawn on <canvas> with no player id in the DOM, but each `li.listFUTItem` row has a hidden `.ut-item-view--stats` row "AVG <coins>". Price tags now show that value on every card (Club too), no searches. Search-based club pricing and the per-id price cache were removed. ⚡ button is draggable (position saved). Diag now lists all `services` keys and Item methods (check for `relistExpiredAuctions` / `requestTransferItems`).
@@ -17,6 +17,7 @@ Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don'
 - v3.6.1 (after first long real run): expired re-pricing never goes below break-even (known cost) or -10% of the old price (unknown cost) - repriceFloor; feed says '♻️ Expired X: re-pricing'. Start asks for confirmation within 6h of an EA captcha/429. Diag now has priceLimitsResponse (EA price range still null on the real app - investigate with the next diag), stopReason, hub, settings. EA serialises criteria.defId as `definitionId=` in the URL (works).
 - v4.0.0: UI restructured like Simple Trader (layout ideas only, own branding): 4 top tiles Sniper / My Hub / Market / Settings. Sniper = target card + Start + run stats + feed + saved searches (old Filters tab). Hub = dashboard + sessions (old Stats tab). Market = gauge + per-card trends from the bot's own price checks (priceHist `futSnipe.priceHist.v1`, pricing.js cardTrends/marketIndex). Settings = sections with explanations (all settings moved off the Sniper view).
 - v4.1.0: search gaps are a random value inside a range per speed (Normal 3.5-5.5s, Night 6.5-9.5s, Turbo 0.6-1.2s; tempo mood leans within it; price-check searches x1.35). Manual sell price (cfg.sellPrice, 0 = auto): lists there, snipe point = snipePoint(min(checked, manual)) (sellAndSnipe), editable on the Sniper card mid-run (applySell). Price check starts at the cheapest fresh listing.
+- v4.2.0: look.js themes (Classic / Sakura default / Neon) via CSS variables --tt-a1/a2/g1/g2/bg; user-picked wallpaper (scaled to 1400px JPEG in `futSnipe.wall.v1`) behind panel + running screen with dim/blur and frosted cards; falling petals. Wallpaper shown via data: URL - if EA's CSP ever blocks it, nothing else breaks.
 - Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
 - Not yet tested on the real EA web app (user was still on 2.4.1 when sending diag).
 - fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).
