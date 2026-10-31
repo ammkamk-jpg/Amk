@@ -58,3 +58,11 @@ Don't re-push the whole file each time. First task after "go": split the script 
 
 ## Suggested second message (after the new session replies)
 > go. Answers: use the 2nd-cheapest fresh listing as the market price; buy anything at or below the snipe point; default relist duration 1h. First split the script into small files, then build the one-button flow.
+
+## Next: animated mascot (user's request, 2026-10-31)
+User wants a slot-machine-style animated anime character in the bot: idles in a corner (breathing, blinking, hair moving) and celebrates each snipe saying "uwuuu~". Must be an ORIGINAL character, clearly adult; Google's filters decide the outfit.
+- If `GEMINI_API_KEY` is set in the environment: generate the still with the Gemini image model, then image-to-video with Veo (idle 4-8 s seamless loop; win 2-4 s with the "uwuuu~" voice; optional sad 2-3 s). Plain bright-green background, static camera. Veo via the API needs billing enabled: confirm cost with the user before generating video.
+- Otherwise the user sends idle.mp4 / win.mp4 / sad.mp4 in the chat.
+- Processing (ffmpeg, available in the container): chromakey the green -> transparent animated WebP (~360 px, ~15 fps, a few hundred KB each) + win audio clip; embed as data URLs (EA's CSP may block external media; img-src data: is what the wallpaper uses).
+- In the bot: new mascot.js; idle loop in a corner of the running screen (and optionally the panel); on snipe swap to the win animation + audio + speech bubble ("uwuuu~ 💖", player + profit) alongside celebrate(); sad clip on stop/failed buy. Settings -> Look: Mascot on/off, size.
+- Never ask the user to paste the API key in chat.
