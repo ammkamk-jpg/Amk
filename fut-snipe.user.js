@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      4.0.0
+// @version      4.1.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '4.0.0';
+  var VERSION = '4.1.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -104,17 +104,25 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: never below base, spread wide and lopsided like a person's (2.5s ->
-  // anywhere 2.6-4.0s before mood, more often on the quick side), and now and then (6%) a 1.5-6s pause,
-  // like someone glancing away.
-  function humanGapMs(base, rnd) {
+  // Gap between searches: always inside [min, max] (Normal 3.5-5.5s), spread over the whole range
+  // (bell-shaped, never the same twice). bias (-0.2..0.2, from the tempo mood) leans it towards
+  // the quick or the slow end for a while.
+  function humanGapMs(min, max, bias, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (1.03 + 0.55 * Math.pow(rnd(), 1.8));
-    if (rnd() < 0.06) ms += 1500 + rnd() * 4500;
-    return Math.round(ms);
+    var u = Math.max(0, Math.min(1, (rnd() + rnd()) / 2 + (bias || 0)));
+    return Math.round(min + (max - min) * u);
   }
-  // Tempo "mood": a person isn't equally fast all session. 1.0-1.2x, re-rolled every 8-25 searches.
-  function nextMood(rnd) { rnd = rnd || Math.random; return { mood: 1 + 0.2 * rnd(), left: 8 + Math.floor(rnd() * 18) }; }
+  // Tempo "mood": a person isn't equally fast all session. A lean of -0.2..0.2 within the range,
+  // re-rolled every 8-25 searches.
+  function nextMood(rnd) { rnd = rnd || Math.random; return { bias: (rnd() - 0.5) * 0.4, left: 8 + Math.floor(rnd() * 18) }; }
+
+  // Manual sell price (0 = use the checked market price). The snipe point comes from the LOWER of
+  // the two, so the target profit holds either way: selling above the market buys at the normal
+  // snipe point (more profit), selling below it buys cheaper.
+  function sellAndSnipe(checked, manual, profit) {
+    var sell = manual > 0 ? roundStep(manual) : checked;
+    return { sell: sell, snipe: snipePoint(Math.min(checked || sell, sell), profit) };
+  }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {
     rnd = rnd || Math.random;
@@ -207,7 +215,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
   }
 
   // ---------- settings & storage ----------
@@ -215,7 +223,7 @@
   var FILT_KEY = 'futSnipe.filters.v1', SESS_KEY = 'futSnipe.sessions.v1', PRICE_KEY = 'futSnipe.prices.v1';
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
-    searchMinMs: 2500, searchJitterMs: 400, buyGapMinMs: 500, buyGapMaxMs: 1100,
+    gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
     breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
@@ -226,14 +234,15 @@
   if (!(cfg.reprobeEvery >= 30 && cfg.reprobeEvery <= 120)) cfg.reprobeEvery = 50; // old saves had 20
   if (cfg.autoClearSold === 0 && cfg.clearSold === 2) { cfg.clearSold = 0; delete cfg.autoClearSold; } // old on/off switch
   // Speed sets only the search/buy cadence (breaks are configured separately).
-  // Turbo ~2 searches/sec, Normal 1 per 2.5s, Night 1 per 6.5s (for overnight runs).
+  // Random gap between searches: Turbo 0.6-1.2s, Normal 3.5-5.5s, Night 6.5-9.5s (overnight runs).
   function applySpeed() {
     var s = cfg.speed | 0;
-    if (s === 2) { cfg.searchMinMs = 500; cfg.searchJitterMs = 150; cfg.buyGapMinMs = 300; cfg.buyGapMaxMs = 700; }
-    else if (s === 0) { cfg.searchMinMs = 6500; cfg.searchJitterMs = 800; cfg.buyGapMinMs = 900; cfg.buyGapMaxMs = 1800; }
-    else { cfg.searchMinMs = 2500; cfg.searchJitterMs = 400; cfg.buyGapMinMs = 500; cfg.buyGapMaxMs = 1100; }
+    if (s === 2) { cfg.gapMinMs = 600; cfg.gapMaxMs = 1200; cfg.buyGapMinMs = 300; cfg.buyGapMaxMs = 700; }
+    else if (s === 0) { cfg.gapMinMs = 6500; cfg.gapMaxMs = 9500; cfg.buyGapMinMs = 900; cfg.buyGapMaxMs = 1800; }
+    else { cfg.gapMinMs = 3500; cfg.gapMaxMs = 5500; cfg.buyGapMinMs = 500; cfg.buyGapMaxMs = 1100; }
+    delete cfg.searchMinMs; delete cfg.searchJitterMs; // old settings
   }
-  function speedHint() { var s = cfg.speed | 0; return s === 2 ? '~2 searches / sec' : s === 0 ? '1 search / 6.5s · overnight' : '1 search / 2.5s'; }
+  function speedHint() { return 'a random ' + (cfg.gapMinMs / 1000) + '-' + (cfg.gapMaxMs / 1000) + 's between searches' + ((cfg.speed | 0) === 0 ? ' · overnight' : ''); }
   applySpeed();
 
   function lsGet(k, d) { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(d)); } catch (e) { return d; } }
@@ -502,10 +511,10 @@
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
   // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
-  var tempo = { mood: 1, left: 0 };
+  var tempo = { bias: 0, left: 0 };
   function pace(slow) {
     if (--tempo.left <= 0) tempo = nextMood();
-    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
+    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 1.35 : 1)));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
   async function search(maxBuy, slow, minBuy, minBid) {
@@ -537,7 +546,9 @@
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
-    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(r.items[0].p));
+    // start at a known price, else the cheapest FRESH listing seen (a stale cheap outlier would cost extra steps)
+    var firstFresh = r.items.filter(function (x) { return isFreshSecs(x.secs); })[0] || r.items[0];
+    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(firstFresh.p));
     for (var tries = 0; probe && tries < 12 && running; tries++) {
       var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) { feed('Search failed (' + ((pr.err || {}).msg || '?') + ')', 'miss'); continue; }
@@ -565,12 +576,12 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var sp = snipePoint(pick.price, cfg.minProfit);
-    if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(pick.price) + ' card'); return false; }
+    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit), sp = ss.snipe;
+    if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(pick.price, sp)), 'price');
+    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (cfg.sellPrice > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
     phase = 'running'; render();
     return true;
@@ -580,6 +591,16 @@
   // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
   // you set (keepMax, optional keepMin).
   function keepMode() { return (cfg.afterBuy | 0) !== 0; }
+  // Where bought cards get listed: your manual sell price, else the checked market price.
+  function listPrice() { return cfg.sellPrice > 0 ? roundStep(cfg.sellPrice) : market.price; }
+  // Sell price or target profit changed (also mid-run): move the snipe point with it.
+  function applySell() {
+    if (keepMode() || !(market.price > 0)) return;
+    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit);
+    if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
+    market.snipe = ss.snipe;
+    if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
+  }
   async function afterBuy(item) {
     if (!keepMode()) return relist(item);
     if (cfg.afterBuy === 2) { feed(searchLabel() + ' left in Unassigned', 'list'); return; }
@@ -610,7 +631,7 @@
   }
 
   async function relist(item) {
-    var sell = market.price; if (!(sell > 0)) return;
+    var sell = listPrice(); if (!(sell > 0)) return;
     await sleep(rand(1500, 4000)); // still lists if you tap Stop meanwhile: a bought card shouldn't sit unlisted
     var moved = await moveToTransfer(item);
     await sleep(rand(600, 1200));
@@ -638,7 +659,7 @@
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var it = r.items[j].it, special = !keep && cfg.keepSpecials && isSpecialBuy(defIdOf(it), capturedPlain || capturedFromUrl);
-        var e = keep || special ? 0 : profitAt(market.price, price);
+        var e = keep || special ? 0 : profitAt(listPrice(), price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
         feed(searchLabel() + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep || special ? null : e); render();
@@ -1080,6 +1101,8 @@
     '.fs-target .fs-cols .c{padding:6px 8px 4px}.fs-target .fs-cols .c:first-child{padding-left:0}.fs-target .sub{font-size:11.5px;color:' + C_MUT + ';margin-top:6px}' +
     '.fs-run{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}.fs-run div{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:12px;padding:7px 4px;text-align:center}' +
     '.fs-run span{display:block;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:' + C_MUT + '}.fs-run b{font-size:15px;font-weight:900;font-variant-numeric:tabular-nums}.fs-run b.g{color:' + C_OK + '}.fs-run b.r{color:' + C_WARN + '}' +
+    '.fs-sell{display:flex;align-items:center;gap:7px;width:100%;margin-top:8px;background:rgba(0,0,0,.25);border:1px dashed rgba(34,211,238,.4);border-radius:12px;padding:9px 12px;color:' + C_TXT + ';font:600 13px ' + FONT + ';text-align:left}' +
+    '.fs-sell b{font-size:15px;font-weight:900}.fs-sell i{font-style:normal;font-size:10px;font-weight:850;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:2px 7px}.fs-sell span{margin-left:auto;color:' + C_A1 + ';font-weight:800;font-size:12px}' +
     // settings view
     '.fs-sect{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:4px 14px;margin-bottom:12px}' +
     '.fs-sect-h{font-size:10.5px;letter-spacing:1.8px;text-transform:uppercase;color:' + C_MUT + ';font-weight:850;padding:12px 2px 8px}.fs-sect>.fs-sect-h{padding-left:0}' +
@@ -1224,6 +1247,7 @@
         '<div class="fs-cols"><div class="c"><div class="l">Market price</div><div class="v" id="fs-t-price">—</div></div>' +
         '<div class="c"><div class="l">Snipe at ≤</div><div class="v c" id="fs-t-snipe">—</div></div>' +
         '<div class="c"><div class="l">Min profit</div><div class="v g" id="fs-t-prof">—</div></div></div>' +
+        '<button class="fs-sell" id="fs-sell"></button>' +
         '<div class="sub" id="fs-t-sub"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
@@ -1281,7 +1305,8 @@
   // ---------- Settings: grouped, each one explained ----------
   function settingsView() {
     return section('Sniping',
-        setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the market price minus tax minus this, rounded down to EA’s price steps.') +
+        setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the sell price minus tax minus this, rounded down to EA’s price steps.') +
+        setting('Sell price', ctlNum('sellPrice'), '0 = auto (the checked market price). Set your own and bought cards are listed there; the snipe point follows so your target profit still holds. Also on the Sniper card.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + auto-relist. Transfer list / Unassigned = no price check, you set the buy price below.') +
         '<div id="fs-keep">' + setting('Buy at or below', ctlNum('keepMax'), 'The most you pay per card (Transfer list / Unassigned mode).') +
           setting('Min price', ctlNum('keepMin'), 'Cards cheaper than this are skipped. 0 = off.') + '</div>' +
@@ -1447,6 +1472,16 @@
     fab.addEventListener('pointerup', end); fab.addEventListener('pointercancel', end);
   }
 
+  // Manual sell price from the Sniper card: "15500", "15.5k", empty / 0 = auto.
+  function askSellPrice() {
+    var cur = cfg.sellPrice > 0 ? String(cfg.sellPrice) : '';
+    var v = window.prompt('Sell price for ' + searchLabel() + (market.price ? ' (market ' + fmt(market.price) + ')' : '') + '\nEmpty or 0 = auto (checked market price)', cur);
+    if (v == null) return;
+    var n = String(v).trim() === '' ? 0 : parseCoins(v);
+    if (n == null || (n > 0 && n < MIN_PRICE)) { blockMsg = 'Sell price not understood: "' + v + '"'; render(); return; }
+    cfg.sellPrice = n > 0 ? roundStep(n) : 0; save(); applySell(); blockMsg = ''; redrawTab();
+  }
+
   // Tabs are only rebuilt when you switch tab; after changing what a tab shows, rebuild it now.
   function redrawTab() { var b = document.getElementById('fs-body'); if (b) b.removeAttribute('data-tab'); render(); }
 
@@ -1483,7 +1518,7 @@
 
     // live label while dragging a slider
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
-    el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; save(); render(); });
+    el.addEventListener('change', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
     el.addEventListener('click', function (e) {
       // closest(): a tap on the subtitle <span> inside a button still counts as that button.
       var tg = e.target && e.target.closest ? e.target.closest('button,[data-tab],[data-sw]') : e.target;
@@ -1497,6 +1532,7 @@
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
+        case 'fs-sell': askSellPrice(); break;
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
@@ -1523,8 +1559,8 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
-        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(market.price, market.snipe)) : '—';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + (cfg.sellPrice > 0 ? ' · sell ' + fmt(listPrice()) : '') + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(listPrice(), market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
         var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
@@ -1557,7 +1593,13 @@
     if (tab === 'settings') { if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
 
     // Sniper view
-    var keep = keepMode(), pr = market.snipe && !keep ? profitAt(market.price, market.snipe) : null;
+    var keep = keepMode(), pr = market.snipe && !keep ? profitAt(listPrice(), market.snipe) : null;
+    var sb = $('fs-sell');
+    if (sb) {
+      sb.style.display = keep ? 'none' : '';
+      var sh = 'Sell at <b>' + (cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) + '</b> <i>yours</i>' : (market.price ? fmt(market.price) : 'market price') + '</b> <i>auto</i>') + '<span>✎ change</span>';
+      if (sb.__html !== sh) { sb.__html = sh; sb.innerHTML = sh; }
+    }
     if ($('fs-t-name')) $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'Search a player in the market';
     if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Keep · Unassigned' : 'Keep · Transfer list') : 'List · ' + durLabel(cfg.listDur);
     if ($('fs-t-price')) $('fs-t-price').textContent = keep ? 'no check' : market.price ? fmt(market.price) : (phase === 'checking' ? '…' : '—');

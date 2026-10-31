@@ -60,17 +60,25 @@
   }
 
   // ---------- human-like randomness ----------
-  // Gap between searches: never below base, spread wide and lopsided like a person's (2.5s ->
-  // anywhere 2.6-4.0s before mood, more often on the quick side), and now and then (6%) a 1.5-6s pause,
-  // like someone glancing away.
-  function humanGapMs(base, rnd) {
+  // Gap between searches: always inside [min, max] (Normal 3.5-5.5s), spread over the whole range
+  // (bell-shaped, never the same twice). bias (-0.2..0.2, from the tempo mood) leans it towards
+  // the quick or the slow end for a while.
+  function humanGapMs(min, max, bias, rnd) {
     rnd = rnd || Math.random;
-    var ms = base * (1.03 + 0.55 * Math.pow(rnd(), 1.8));
-    if (rnd() < 0.06) ms += 1500 + rnd() * 4500;
-    return Math.round(ms);
+    var u = Math.max(0, Math.min(1, (rnd() + rnd()) / 2 + (bias || 0)));
+    return Math.round(min + (max - min) * u);
   }
-  // Tempo "mood": a person isn't equally fast all session. 1.0-1.2x, re-rolled every 8-25 searches.
-  function nextMood(rnd) { rnd = rnd || Math.random; return { mood: 1 + 0.2 * rnd(), left: 8 + Math.floor(rnd() * 18) }; }
+  // Tempo "mood": a person isn't equally fast all session. A lean of -0.2..0.2 within the range,
+  // re-rolled every 8-25 searches.
+  function nextMood(rnd) { rnd = rnd || Math.random; return { bias: (rnd() - 0.5) * 0.4, left: 8 + Math.floor(rnd() * 18) }; }
+
+  // Manual sell price (0 = use the checked market price). The snipe point comes from the LOWER of
+  // the two, so the target profit holds either way: selling above the market buys at the normal
+  // snipe point (more profit), selling below it buys cheaper.
+  function sellAndSnipe(checked, manual, profit) {
+    var sell = manual > 0 ? roundStep(manual) : checked;
+    return { sell: sell, snipe: snipePoint(Math.min(checked || sell, sell), profit) };
+  }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {
     rnd = rnd || Math.random;
@@ -163,5 +171,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
   }

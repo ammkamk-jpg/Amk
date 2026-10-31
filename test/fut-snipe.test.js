@@ -62,20 +62,23 @@ test("probeMid stays on valid prices and stops when lo/hi are neighbours", () =>
   assert.ok(m > 9900 && m < 10250 && m === P.floorStep(m));
 });
 
-test("search gaps: never below 2.5s, widely spread, sometimes long", () => {
-  const gaps = Array.from({ length: 4000 }, () => P.humanGapMs(2500)).sort((a, b) => a - b);
+test("search gaps: Normal is always 3.5-5.5s, spread over the whole range", () => {
+  const gaps = Array.from({ length: 4000 }, () => P.humanGapMs(3500, 5500, 0)).sort((a, b) => a - b);
   const pct = (p) => gaps[Math.floor(gaps.length * p)];
-  assert.ok(gaps[0] >= 2575, `never below 2.5s (min ${gaps[0]})`);
+  assert.ok(gaps[0] >= 3500 && gaps[gaps.length - 1] <= 5500, `range ${gaps[0]}..${gaps[gaps.length - 1]}`);
+  assert.ok(gaps[0] < 3800 && gaps[gaps.length - 1] > 5200, "reaches both ends");
   assert.ok(pct(0.9) - pct(0.1) >= 900, `spread p10 ${pct(0.1)} .. p90 ${pct(0.9)}`);
-  assert.ok(pct(0.5) >= 2900 && pct(0.5) <= 3500, `median ${pct(0.5)}`);
-  assert.ok(gaps[gaps.length - 1] > 5000, "sometimes a long pause");
-  assert.ok(new Set(gaps).size > 900, "hardly ever the same twice");
+  assert.ok(new Set(gaps).size > 1000, "hardly ever the same twice");
+  const slowMood = Array.from({ length: 2000 }, () => P.humanGapMs(3500, 5500, 0.2)), fastMood = Array.from({ length: 2000 }, () => P.humanGapMs(3500, 5500, -0.2));
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  assert.ok(avg(slowMood) > avg(fastMood) + 500, "mood leans quick or slow");
+  assert.ok(Math.max(...slowMood) <= 5500 && Math.min(...fastMood) >= 3500, "still inside the range");
 });
 
-test("tempo mood: 1.0-1.2x for 8-25 searches", () => {
+test("tempo mood: lean -0.2..0.2 for 8-25 searches", () => {
   for (let i = 0; i < 300; i++) {
     const m = P.nextMood();
-    assert.ok(m.mood >= 1 && m.mood <= 1.2 && m.left >= 8 && m.left <= 25, JSON.stringify(m));
+    assert.ok(m.bias >= -0.2 && m.bias <= 0.2 && m.left >= 8 && m.left <= 25, JSON.stringify(m));
   }
 });
 
@@ -213,4 +216,19 @@ test("market overview from the bot's own price checks", () => {
   assert.equal(P.marketIndex([hist[0], hist[1]], now).index, 75, "+5% -> 75");
   assert.equal(P.marketIndex([{ id: 1, p: 100, t: now - h }, { id: 1, p: 50, t: now }], now).index, 0, "capped at 0");
   assert.equal(P.marketIndex([hist[4]], now), null, "not enough checks");
+});
+
+test("manual sell price: list there, keep the target profit", () => {
+  assert.deepEqual(P.sellAndSnipe(15000, 0, 500), { sell: 15000, snipe: 13750 }, "auto: checked price");
+  assert.deepEqual(P.sellAndSnipe(15000, 16000, 500), { sell: 16000, snipe: 13750 }, "above market: normal snipe point, more profit");
+  const low = P.sellAndSnipe(15000, 14000, 500);
+  assert.equal(low.sell, 14000); assert.ok(P.profitAt(14000, low.snipe) >= 500, "below market: buys cheaper so +500 still holds");
+  assert.equal(P.sellAndSnipe(15000, 15040, 500).sell, 15000, "rounded to a valid price");
+});
+
+test("price check from the cheapest fresh listing skips a stale outlier quickly", () => {
+  const market = [{ price: 9000, secs: 400 }].concat(Array.from({ length: 30 }, (_, i) => ({ price: 14750 + i * 250, secs: 3400 })));
+  const fromOutlier = runCheck(market, 9000), fromFresh = runCheck(market, 14750);
+  assert.equal(fromFresh.price, 15000);
+  assert.ok(fromFresh.searches < fromOutlier.searches, `${fromFresh.searches} vs ${fromOutlier.searches} searches`);
 });

@@ -11,10 +11,10 @@
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
   // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
-  var tempo = { mood: 1, left: 0 };
+  var tempo = { bias: 0, left: 0 };
   function pace(slow) {
     if (--tempo.left <= 0) tempo = nextMood();
-    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.searchMinMs * tempo.mood * (slow ? 1.35 : 1))));
+    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 1.35 : 1)));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
   async function search(maxBuy, slow, minBuy, minBid) {
@@ -46,7 +46,9 @@
     if (!r.ok || !r.items.length) return null;
     if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
-    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(r.items[0].p));
+    // start at a known price, else the cheapest FRESH listing seen (a stale cheap outlier would cost extra steps)
+    var firstFresh = r.items.filter(function (x) { return isFreshSecs(x.secs); })[0] || r.items[0];
+    var probe = Math.min(top, start > 0 ? floorStep(start) : roundStep(firstFresh.p));
     for (var tries = 0; probe && tries < 12 && running; tries++) {
       var pr = await search(probe, true); if (!pr) return null;
       if (!pr.ok) { feed('Search failed (' + ((pr.err || {}).msg || '?') + ')', 'miss'); continue; }
@@ -74,12 +76,12 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var sp = snipePoint(pick.price, cfg.minProfit);
-    if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(pick.price) + ' card'); return false; }
+    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit), sp = ss.snipe;
+    if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(pick.price, sp)), 'price');
+    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (cfg.sellPrice > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
     phase = 'running'; render();
     return true;
@@ -89,6 +91,16 @@
   // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
   // you set (keepMax, optional keepMin).
   function keepMode() { return (cfg.afterBuy | 0) !== 0; }
+  // Where bought cards get listed: your manual sell price, else the checked market price.
+  function listPrice() { return cfg.sellPrice > 0 ? roundStep(cfg.sellPrice) : market.price; }
+  // Sell price or target profit changed (also mid-run): move the snipe point with it.
+  function applySell() {
+    if (keepMode() || !(market.price > 0)) return;
+    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit);
+    if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
+    market.snipe = ss.snipe;
+    if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
+  }
   async function afterBuy(item) {
     if (!keepMode()) return relist(item);
     if (cfg.afterBuy === 2) { feed(searchLabel() + ' left in Unassigned', 'list'); return; }
@@ -119,7 +131,7 @@
   }
 
   async function relist(item) {
-    var sell = market.price; if (!(sell > 0)) return;
+    var sell = listPrice(); if (!(sell > 0)) return;
     await sleep(rand(1500, 4000)); // still lists if you tap Stop meanwhile: a bought card shouldn't sit unlisted
     var moved = await moveToTransfer(item);
     await sleep(rand(600, 1200));
@@ -147,7 +159,7 @@
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var it = r.items[j].it, special = !keep && cfg.keepSpecials && isSpecialBuy(defIdOf(it), capturedPlain || capturedFromUrl);
-        var e = keep || special ? 0 : profitAt(market.price, price);
+        var e = keep || special ? 0 : profitAt(listPrice(), price);
         stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
         feed(searchLabel() + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep || special ? null : e); render();
