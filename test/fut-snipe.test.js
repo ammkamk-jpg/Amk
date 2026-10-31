@@ -196,3 +196,21 @@ test("re-pricing expired cards never dumps them", () => {
   assert.deepEqual(P.repriceFloor(15000, 22000, null), { price: 19750, floored: true }, "cost unknown: at most 10% under the old price");
   assert.deepEqual(P.repriceFloor(20500, 22000, null), { price: 20500, floored: false });
 });
+
+test("market overview from the bot's own price checks", () => {
+  const now = 1e12, h = 3600000;
+  const hist = [
+    { id: 1, name: "A", p: 10000, t: now - 5 * h }, { id: 1, name: "A", p: 10500, t: now - 1 * h }, // +5%
+    { id: 2, name: "B", p: 20000, t: now - 4 * h }, { id: 2, name: "B", p: 19000, t: now - 2 * h }, // -5%
+    { id: 3, name: "C", p: 5000, t: now - 3 * h },                                                  // one check: no trend
+    { id: 4, name: "D", p: 9000, t: now - 30 * h }, { id: 4, name: "D", p: 9900, t: now - 26 * h }, // older than 24h
+  ];
+  const tr = P.cardTrends(hist, now);
+  assert.deepEqual(tr.map((c) => c.id), ["1", "2", "3"], "newest first, last 24h only");
+  assert.equal(Math.round(tr[0].pct), 5);
+  assert.equal(tr[2].pct, null);
+  assert.deepEqual(P.marketIndex(hist, now), { index: 50, pct: 0, cards: 2 }, "+5% and -5%: flat");
+  assert.equal(P.marketIndex([hist[0], hist[1]], now).index, 75, "+5% -> 75");
+  assert.equal(P.marketIndex([{ id: 1, p: 100, t: now - h }, { id: 1, p: 50, t: now }], now).index, 0, "capped at 0");
+  assert.equal(P.marketIndex([hist[4]], now), null, "not enough checks");
+});

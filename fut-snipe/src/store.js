@@ -49,6 +49,14 @@
     ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
   }
   function noteBuy(id, buy, name, pack, rating, list) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack, rating: rating || null, list: list || null }; saveLedger(); }
+  // Every price check, for the Market view (last ~2 days, max 400 entries).
+  var PRICES_KEY = 'futSnipe.priceHist.v1', priceHist = lsGet(PRICES_KEY, []);
+  function notePrice(id, name, p) {
+    if (id == null || !(p > 0)) return;
+    var cut = Date.now() - 2 * 86400000;
+    priceHist.push({ id: String(id), name: name, p: p, t: Date.now() });
+    priceHist = priceHist.filter(function (h) { return h.t >= cut; }).slice(-400); lsSet(PRICES_KEY, priceHist);
+  }
   function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
 
   // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).

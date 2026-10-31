@@ -95,6 +95,25 @@
     return found >= floor ? { price: found, floored: false } : { price: floor, floored: true };
   }
 
+  // ---------- market overview (from the bot's own price checks) ----------
+  // history: [{id, name, p, t}] newest last. Per card checked 2+ times in the window: change from
+  // its first to its last price. Index 50 = flat; each 1% average change moves it 5 points
+  // (+/-10% or more = 100 / 0). null = not enough checks yet.
+  function cardTrends(history, now, windowMs) {
+    var since = now - (windowMs || 86400000), by = {};
+    history.forEach(function (h) { if (h.t >= since && h.p > 0) (by[h.id] = by[h.id] || []).push(h); });
+    return Object.keys(by).map(function (id) {
+      var l = by[id].sort(function (a, b) { return a.t - b.t; }), first = l[0], last = l[l.length - 1];
+      return { id: id, name: last.name, price: last.p, t: last.t, n: l.length, pct: l.length > 1 ? (last.p - first.p) / first.p * 100 : null, pts: l.map(function (x) { return x.p; }) };
+    }).sort(function (a, b) { return b.t - a.t; });
+  }
+  function marketIndex(history, now, windowMs) {
+    var tr = cardTrends(history, now, windowMs).filter(function (c) { return c.pct != null; });
+    if (!tr.length) return null;
+    var avg = tr.reduce(function (s, c) { return s + c.pct; }, 0) / tr.length;
+    return { index: Math.round(50 + Math.max(-10, Math.min(10, avg)) * 5), pct: avg, cards: tr.length };
+  }
+
   // ---------- fresh results ----------
   // A different min bid on every snipe search (0 or 150-1,000, below half the snipe point, never the
   // same twice in a row) makes every request unique, so EA can't answer with a cached result.
@@ -144,5 +163,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
   }

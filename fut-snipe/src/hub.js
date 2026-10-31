@@ -56,7 +56,7 @@
     var def = defIdOf(it);
     // defId = [exact version], so cheaper versions of the same player don't crowd the 21 results.
     searchBase = { type: 'player', maskedDefId: baseIdOf(def), defId: [Number(def)], count: 21 }; matchId = def; curName = nameOf(it) || curName; gotRange = true;
-    try { return await fn(); }
+    try { var res = await fn(); if (res && res.price) notePrice(def, nameOf(it) || 'Card', res.price); return res; }
     finally { searchBase = keep.searchBase; matchId = keep.matchId; curName = keep.curName; gotRange = keep.gotRange; }
   }
   async function listAt(it, price, why) {

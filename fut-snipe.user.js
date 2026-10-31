@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      3.6.1
+// @version      4.0.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '3.6.1';
+  var VERSION = '4.0.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -139,6 +139,25 @@
     return found >= floor ? { price: found, floored: false } : { price: floor, floored: true };
   }
 
+  // ---------- market overview (from the bot's own price checks) ----------
+  // history: [{id, name, p, t}] newest last. Per card checked 2+ times in the window: change from
+  // its first to its last price. Index 50 = flat; each 1% average change moves it 5 points
+  // (+/-10% or more = 100 / 0). null = not enough checks yet.
+  function cardTrends(history, now, windowMs) {
+    var since = now - (windowMs || 86400000), by = {};
+    history.forEach(function (h) { if (h.t >= since && h.p > 0) (by[h.id] = by[h.id] || []).push(h); });
+    return Object.keys(by).map(function (id) {
+      var l = by[id].sort(function (a, b) { return a.t - b.t; }), first = l[0], last = l[l.length - 1];
+      return { id: id, name: last.name, price: last.p, t: last.t, n: l.length, pct: l.length > 1 ? (last.p - first.p) / first.p * 100 : null, pts: l.map(function (x) { return x.p; }) };
+    }).sort(function (a, b) { return b.t - a.t; });
+  }
+  function marketIndex(history, now, windowMs) {
+    var tr = cardTrends(history, now, windowMs).filter(function (c) { return c.pct != null; });
+    if (!tr.length) return null;
+    var avg = tr.reduce(function (s, c) { return s + c.pct; }, 0) / tr.length;
+    return { index: Math.round(50 + Math.max(-10, Math.min(10, avg)) * 5), pct: avg, cards: tr.length };
+  }
+
   // ---------- fresh results ----------
   // A different min bid on every snipe search (0 or 150-1,000, below half the snipe point, never the
   // same twice in a row) makes every request unique, so EA can't answer with a cached result.
@@ -188,7 +207,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
   }
 
   // ---------- settings & storage ----------
@@ -242,6 +261,14 @@
     ledger.sales = ledger.sales.slice(0, 300); lsSet(LEDGER_KEY, ledger);
   }
   function noteBuy(id, buy, name, pack, rating, list) { if (id == null) return; ledger.buys[String(id)] = { buy: buy, t: Date.now(), name: name, pack: !!pack, rating: rating || null, list: list || null }; saveLedger(); }
+  // Every price check, for the Market view (last ~2 days, max 400 entries).
+  var PRICES_KEY = 'futSnipe.priceHist.v1', priceHist = lsGet(PRICES_KEY, []);
+  function notePrice(id, name, p) {
+    if (id == null || !(p > 0)) return;
+    var cut = Date.now() - 2 * 86400000;
+    priceHist.push({ id: String(id), name: name, p: p, t: Date.now() });
+    priceHist = priceHist.filter(function (h) { return h.t >= cut; }).slice(-400); lsSet(PRICES_KEY, priceHist);
+  }
   function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
 
   // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).
@@ -541,6 +568,7 @@
     var sp = snipePoint(pick.price, cfg.minProfit);
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(pick.price) + ' card'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
+    notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
     feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(pick.price, sp)), 'price');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
@@ -722,7 +750,7 @@
     var def = defIdOf(it);
     // defId = [exact version], so cheaper versions of the same player don't crowd the 21 results.
     searchBase = { type: 'player', maskedDefId: baseIdOf(def), defId: [Number(def)], count: 21 }; matchId = def; curName = nameOf(it) || curName; gotRange = true;
-    try { return await fn(); }
+    try { var res = await fn(); if (res && res.price) notePrice(def, nameOf(it) || 'Card', res.price); return res; }
     finally { searchBase = keep.searchBase; matchId = keep.matchId; curName = keep.curName; gotRange = keep.gotRange; }
   }
   async function listAt(it, price, why) {
@@ -996,17 +1024,8 @@
     '#fs-head .t2{font-size:10px;font-weight:800;letter-spacing:3px;color:' + C_MUT + ';margin-left:7px}#fs-head .v{font-size:10px;color:#5d6678;margin-left:6px}' +
     '#fs-head .coins{font-size:13px;font-weight:800;color:#fde68a;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:999px;padding:7px 12px}' +
     '#fs-min{background:' + C_GLASS + ';color:' + C_TXT + ';border:1px solid ' + C_LINE + ';border-radius:999px;width:36px;height:36px;font-size:15px;margin-left:8px}' +
-    '#fs-tabs{display:flex;gap:4px;margin:4px 16px 0;padding:4px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px}' +
-    '.fs-tab{flex:1;text-align:center;padding:8px;border-radius:10px;color:' + C_MUT + ';font-weight:700;font-size:13px;transition:.2s}' +
-    '.fs-tab.on{background:rgba(255,255,255,.09);color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3)}' +
     '#fs-body{flex:1;overflow:auto;padding:14px 16px;padding-bottom:max(28px,env(safe-area-inset-bottom));width:100%;max-width:520px;margin:0 auto}' +
     // hero
-    '.fs-hero{position:relative;overflow:hidden;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:22px;padding:18px 16px;margin-bottom:12px;text-align:center}' +
-    '.fs-hero:before{content:"";position:absolute;inset:-1px;border-radius:22px;padding:1px;background:' + GRAD + ';-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.55;pointer-events:none}' +
-    '.fs-hero .l{font-size:10px;letter-spacing:2px;color:' + C_MUT + ';text-transform:uppercase;font-weight:700}' +
-    '.fs-hero .big{font-size:42px;font-weight:900;letter-spacing:-1px;line-height:1.1;margin-top:4px;background:' + GRAD + ';-webkit-background-clip:text;background-clip:text;color:transparent}' +
-    '.fs-hero .sub{font-size:12px;color:' + C_MUT + ';margin-top:4px}' +
-    '.fs-hero .prof{display:inline-block;margin-top:10px;font-size:13px;font-weight:800;color:' + C_OK + ';background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);border-radius:999px;padding:5px 12px}.fs-hero .prof:empty{display:none}' +
     // cards / stats
     '.fs-card{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;overflow:hidden;margin-bottom:12px}' +
     '.fs-ch{font-size:10px;letter-spacing:1.6px;color:' + C_MUT + ';text-transform:uppercase;font-weight:700;padding:11px 14px 0}' +
@@ -1014,17 +1033,10 @@
     '.fs-cols .c{padding:6px 14px 12px;border-right:1px solid ' + C_LINE + '}.fs-cols .c:last-child{border-right:0}' +
     '.fs-cols .l{font-size:9.5px;letter-spacing:1px;color:' + C_MUT + ';text-transform:uppercase}' +
     '.fs-cols .v{font-size:18px;font-weight:850;margin-top:2px;font-variant-numeric:tabular-nums}.fs-cols .v.c{color:' + C_A1 + '}.fs-cols .v.g{color:' + C_OK + '}.fs-cols .v.r{color:' + C_WARN + '}' +
-    '.fs-life{font-size:11px;color:#6b7487;text-align:center;padding:0 0 11px}' +
     // settings rows
-    '.fs-rows{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;margin-bottom:12px;overflow:hidden}' +
-    '.fs-r{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;border-bottom:1px solid ' + C_LINE + '}.fs-r:last-child{border-bottom:0}' +
-    '.fs-r .lab{display:flex;align-items:center;gap:10px;color:#dbe2ee;font-size:13.5px}.fs-r .ic{width:18px;text-align:center}' +
-    '.fs-r.rcol{flex-direction:column;align-items:stretch;gap:9px}.fs-r.rcol .lab{width:100%}.fs-r.rcol .sv{margin-left:auto;color:' + C_A1 + ';font-weight:800}' +
-    '.fs-r input[type=number]{width:96px;background:rgba(0,0,0,.35);border:1px solid ' + C_LINE + ';color:' + C_TXT + ';border-radius:10px;padding:8px 10px;font-size:14px;font-weight:700;text-align:right}' +
     '.fs-sw{width:46px;height:28px;flex:none;border-radius:999px;background:rgba(255,255,255,.14);position:relative;transition:.2s}.fs-sw.on{background:' + GRAD + '}.fs-sw:after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:.2s cubic-bezier(.3,1.4,.5,1)}.fs-sw.on:after{left:21px}' +
     '.fs-segw{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:64%}.fs-sg{background:rgba(0,0,0,.3);color:#b3bccb;border:1px solid ' + C_LINE + ';border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700;transition:.15s}.fs-sg.on{background:' + GRAD + ';color:#0b0f1a;border-color:transparent}' +
     '.fs-range{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:999px;background:rgba(255,255,255,.12);outline:none;margin:2px 0}.fs-range::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#fff;border:0;box-shadow:0 0 0 4px rgba(34,211,238,.35),0 2px 6px rgba(0,0,0,.4)}' +
-    '.fs-hint{font-size:11px;color:' + C_MUT + ';padding:0 14px 10px;margin-top:-4px}' +
     // buttons
     '.fs-btn{position:relative;overflow:hidden;width:100%;border:0;border-radius:18px;padding:16px;font-size:17px;font-weight:900;letter-spacing:.3px;transition:transform .12s}.fs-btn:active{transform:scale(.97)}' +
     '.fs-go{background:' + GRAD + ';color:#0b0f1a;box-shadow:0 10px 30px -8px rgba(34,211,238,.55)}' +
@@ -1035,7 +1047,6 @@
     '#fs-block{color:' + C_WARN + ';font-size:12px;margin:0 0 10px}#fs-block:empty{display:none}' +
     '#fs-status{font-size:12px;color:' + C_MUT + ';margin:12px 2px 0;text-align:center}' +
     '#fs-log{margin:8px 0 0;max-height:90px;overflow:auto;white-space:pre-wrap;color:#6b7487;font-size:11px;line-height:1.5}#fs-log:empty{display:none}' +
-    '.fs-sec{margin-top:4px}.fs-sec summary{cursor:pointer;color:' + C_MUT + ';font-size:12px;font-weight:700;padding:8px 4px;list-style:none}.fs-sec summary::-webkit-details-marker{display:none}.fs-sec summary:before{content:"›";display:inline-block;margin-right:7px;transition:.2s}.fs-sec[open] summary:before{transform:rotate(90deg)}' +
     '#fs-act{font-size:13px;color:' + C_A1 + ';font-weight:800;text-align:center;margin:12px 2px 0;min-height:18px}' +
     // filters / stats tabs
     '.fs-item{display:flex;align-items:center;justify-content:space-between;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:13px 14px;margin-bottom:9px}' +
@@ -1053,6 +1064,37 @@
     '.fs-sale{display:flex;justify-content:space-between;align-items:center;gap:10px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:10px 14px;margin-bottom:7px}' +
     '.fs-sale .nm{font-weight:800;font-size:13.5px}.fs-sale .de{font-size:11px;color:' + C_MUT + ';margin-top:1px}.fs-sale .pf{font-weight:900;font-size:15px;color:' + C_MUT + '}.fs-sale .pf.pos{color:' + C_OK + '}.fs-sale .pf.neg{color:' + C_WARN + '}' +
     '.fs-sale .pk{font-size:9.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#0b0f1a;background:' + GRAD + ';border-radius:999px;padding:1px 6px;vertical-align:2px}' +
+    // top tiles (Sniper / My Hub / Market / Settings)
+    '#fs-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 16px 0}' +
+    '.fs-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:78px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:16px;padding:8px 4px;transition:.15s}' +
+    '.fs-tile.on{background:rgba(34,211,238,.08);border-color:rgba(34,211,238,.45);box-shadow:0 0 0 1px rgba(34,211,238,.15) inset}' +
+    '.fs-tile .ti{width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.07);font-size:16px;color:' + C_TXT + '}' +
+    '.fs-tile.on .ti{background:' + GRAD + ';color:#0b0f1a}.fs-tile .ti.live{color:' + C_OK + ';animation:fsping2 1.4s infinite}' +
+    '.fs-tile .tl{font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:800;color:' + C_MUT + '}.fs-tile.on .tl{color:' + C_TXT + '}' +
+    '.fs-tile .tg{position:relative;width:52px;height:34px}.fs-tile .tg svg{width:52px;height:31px}.fs-tile .tg b{position:absolute;left:0;right:0;bottom:-1px;text-align:center;font-size:13px;font-weight:900}' +
+    // sniper view
+    '.fs-target{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:20px;padding:14px 14px 10px;margin-bottom:12px}' +
+    '.fs-target .tt-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px}' +
+    '.fs-target .k{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:' + C_MUT + ';font-weight:800}.fs-target .nm{font-size:20px;font-weight:900;letter-spacing:-.3px}' +
+    '.fs-target .mode{flex:none;font-size:11px;font-weight:850;color:' + C_A1 + ';background:rgba(34,211,238,.12);border-radius:999px;padding:5px 10px}' +
+    '.fs-target .fs-cols .c{padding:6px 8px 4px}.fs-target .fs-cols .c:first-child{padding-left:0}.fs-target .sub{font-size:11.5px;color:' + C_MUT + ';margin-top:6px}' +
+    '.fs-run{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}.fs-run div{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:12px;padding:7px 4px;text-align:center}' +
+    '.fs-run span{display:block;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:' + C_MUT + '}.fs-run b{font-size:15px;font-weight:900;font-variant-numeric:tabular-nums}.fs-run b.g{color:' + C_OK + '}.fs-run b.r{color:' + C_WARN + '}' +
+    // settings view
+    '.fs-sect{background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:4px 14px;margin-bottom:12px}' +
+    '.fs-sect-h{font-size:10.5px;letter-spacing:1.8px;text-transform:uppercase;color:' + C_MUT + ';font-weight:850;padding:12px 2px 8px}.fs-sect>.fs-sect-h{padding-left:0}' +
+    '.fs-set{padding:12px 0;border-top:1px solid ' + C_LINE + '}.fs-sect>.fs-sect-h+.fs-set,.fs-sect>.fs-sect-h+div>.fs-set:first-child{border-top:0}' +
+    '.fs-set .top{display:flex;align-items:center;justify-content:space-between;gap:12px}.fs-set .nm{font-size:14.5px;font-weight:800;color:' + C_TXT + '}' +
+    '.fs-set>.fs-segw{max-width:none;justify-content:flex-start;margin-top:9px}.fs-set>.fs-range{margin-top:10px}.fs-set .sv{color:' + C_A1 + ';font-weight:850;white-space:nowrap}' +
+    '.ds{font-size:12px;line-height:1.45;color:' + C_MUT + ';margin-top:6px}' +
+    '.fs-num{width:104px;flex:none;background:rgba(0,0,0,.35);border:1px solid ' + C_LINE + ';color:' + C_TXT + ';border-radius:10px;padding:9px 10px;font:800 15px ' + FONT + ';text-align:right}' +
+    '#fs-keep .fs-set:first-child{border-top:1px solid ' + C_LINE + '}' +
+    // market view
+    '.fs-mkt{position:relative;width:230px;max-width:80%;margin:4px auto 6px}.fs-mkt svg{width:100%;display:block}' +
+    '.fs-mkt .mv{position:absolute;left:0;right:0;bottom:2px;text-align:center}.fs-mkt .mv b{display:block;font-size:40px;font-weight:950;line-height:1;letter-spacing:-1px}.fs-mkt .mv span{font-size:11.5px;color:' + C_MUT + ';font-weight:700}' +
+    '.fs-mrow{display:flex;align-items:center;gap:10px;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:14px;padding:10px 12px;margin-bottom:7px}' +
+    '.fs-mrow .nm{flex:1;min-width:0;font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fs-mrow .de{font-size:10.5px;color:#6b7487;font-weight:600}' +
+    '.fs-mrow .msp{width:60px;height:20px;flex:none}.fs-mrow .pr{text-align:right;flex:none}.fs-mrow .pr b{display:block;font-size:14px;font-variant-numeric:tabular-nums}.fs-mrow .pr span{font-size:11px;font-weight:800;color:' + C_MUT + '}.fs-mrow .pr .up{color:' + C_OK + '}.fs-mrow .pr .down{color:#fb7185}' +
     // hub dashboard
     '.fs-dash{display:grid;grid-template-columns:1.3fr 1fr;gap:10px;margin-bottom:10px}' +
     '.fs-dc{position:relative;overflow:hidden;background:' + C_GLASS + ';border:1px solid ' + C_LINE + ';border-radius:20px;padding:13px 14px 12px;min-height:150px}' +
@@ -1161,75 +1203,117 @@
   function ago(t) { var d = (Date.now() - t) / 1000; if (d < 60) return 'just now'; if (d < 3600) return Math.round(d / 60) + 'm ago'; if (d < 86400) return Math.round(d / 3600) + 'h ago'; return Math.round(d / 86400) + 'd ago'; }
   function durLabel(s) { for (var i = 0; i < LIST_DURS.length; i++) if (LIST_DURS[i][1] === s) return LIST_DURS[i][0]; return Math.round((s || 3600) / 3600) + 'h'; }
 
-  function row(ic, label, key) { return '<label class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><input data-k="' + key + '" type="number" value="' + cfg[key] + '"></label>'; }
-  function swRow(ic, label, key) { return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div></div>'; }
-  function segRow(ic, label, key, opts) { var b = opts.map(function (o) { return '<button class="fs-sg' + (cfg[key] === o[1] ? ' on' : '') + '" data-seg="' + key + '" data-val="' + o[1] + '">' + o[0] + '</button>'; }).join(''); return '<div class="fs-r"><span class="lab"><span class="ic">' + ic + '</span>' + label + '</span><div class="fs-segw">' + b + '</div></div>'; }
-  function sliderRow(ic, label, key, min, max, step, unit) { return '<div class="fs-r rcol"><div class="lab"><span class="ic">' + ic + '</span>' + label + ' <b class="sv" data-sv="' + key + '">' + cfg[key] + unit + '</b></div><input class="fs-range" data-k="' + key + '" data-unit="' + unit + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + cfg[key] + '"></div>'; }
+  // ---------- settings controls: name + control, explanation underneath ----------
+  function ctlNum(key) { return '<input class="fs-num" data-k="' + key + '" type="number" inputmode="numeric" value="' + cfg[key] + '">'; }
+  function ctlSw(key) { return '<div class="fs-sw' + (cfg[key] ? ' on' : '') + '" data-sw="' + key + '"></div>'; }
+  function ctlSeg(key, opts) { return '<div class="fs-segw">' + opts.map(function (o) { return '<button class="fs-sg' + (cfg[key] === o[1] ? ' on' : '') + '" data-seg="' + key + '" data-val="' + o[1] + '">' + o[0] + '</button>'; }).join('') + '</div>'; }
+  function setting(name, ctl, desc, id) {
+    return '<div class="fs-set"' + (id ? ' id="' + id + '"' : '') + '><div class="top"><div class="nm">' + name + '</div>' + ctl + '</div>' + (desc ? '<div class="ds">' + desc + '</div>' : '') + '</div>';
+  }
+  function segSetting(name, key, opts, desc) { return '<div class="fs-set"><div class="nm">' + name + '</div>' + ctlSeg(key, opts) + (desc ? '<div class="ds">' + desc + '</div>' : '') + '</div>'; }
+  function rangeSetting(name, key, min, max, step, unit, desc) {
+    return '<div class="fs-set"><div class="top"><div class="nm">' + name + '</div><b class="sv" data-sv="' + key + '">' + cfg[key] + unit + '</b></div>' +
+      '<input class="fs-range" data-k="' + key + '" data-unit="' + unit + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + cfg[key] + '">' + (desc ? '<div class="ds">' + desc + '</div>' : '') + '</div>';
+  }
+  function section(title, body) { return '<div class="fs-sect"><div class="fs-sect-h">' + title + '</div>' + body + '</div>'; }
 
-  function snipeView() {
-    return '' +
-      '<div id="fs-block"></div>' +
-      '<div class="fs-hero"><div class="l" style="font-size:9px;letter-spacing:.5px;color:#6f8498;text-transform:uppercase">Snipe point</div>' +
-        '<div class="big" id="fs-hero-max">—</div>' +
-        '<div class="sub" id="fs-hero-sub"></div>' +
-        '<div class="prof" id="fs-hero-prof"></div></div>' +
-      '<div class="fs-card"><div class="fs-ch">This run</div><div class="fs-cols">' +
-        '<div class="c"><div class="l">Bought</div><div class="v" id="fs-s-buys">0</div></div>' +
-        '<div class="c"><div class="l">Est. profit</div><div class="v g" id="fs-s-est">—</div></div>' +
-        '<div class="c"><div class="l">Coins net</div><div class="v" id="fs-s-net">—</div></div>' +
-      '</div><div class="fs-life" id="fs-life"></div></div>' +
+  // ---------- Sniper: what it's trading, Start, live feed, saved searches ----------
+  function sniperView() {
+    return '<div id="fs-block"></div>' +
+      '<div class="fs-target"><div class="tt-top"><div><div class="k">Target</div><div class="nm" id="fs-t-name">—</div></div><div class="mode" id="fs-t-mode"></div></div>' +
+        '<div class="fs-cols"><div class="c"><div class="l">Market price</div><div class="v" id="fs-t-price">—</div></div>' +
+        '<div class="c"><div class="l">Snipe at ≤</div><div class="v c" id="fs-t-snipe">—</div></div>' +
+        '<div class="c"><div class="l">Min profit</div><div class="v g" id="fs-t-prof">—</div></div></div>' +
+        '<div class="sub" id="fs-t-sub"></div></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
-      '<div id="fs-act"></div><div class="fs-feed"></div>' +
-      '<div class="fs-rows" style="margin-top:11px">' +
-        row('🎯', 'Target profit / card', 'minProfit') +
-        segRow('🔊', 'Snipe sound', 'sound', SOUNDS) +
-        swRow('📳', 'Vibrate on snipe', 'vibrate') +
-        segRow('⏳', 'List for', 'listDur', LIST_DURS) +
-        segRow('🛒', 'After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]]) +
-        '<div id="fs-keep">' +
-          '<div class="fs-hint" style="padding-top:2px">Price check is off in this mode — you set the price:</div>' +
-          row('◎', 'Buy at or below', 'keepMax') + row('⬆︎', 'Min price (0 = off)', 'keepMin') +
-        '</div>' +
-        swRow('♻️', 'Relist expired cards', 'relistExpired') +
-        sliderRow('🔁', 'Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches') +
-        swRow('🏷️', 'Price tags on cards', 'badges') +
-        swRow('🔄', 'Vary min bid (fresh results)', 'varyMinBid') +
-        '<div class="fs-hint">A different min bid (0-1,000) on every search so EA always returns fresh results.</div>' +
-        segRow('🏎️', 'Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]]) +
-        '<div class="fs-hint" id="fs-speedhint">' + speedHint() + '</div>' +
-        sliderRow('⏸️', 'Break every', 'breakEvery', 20, 120, 5, ' searches') +
-        sliderRow('😴', 'Break length', 'breakSec', 15, 300, 5, 's') +
-      '</div>' +
-      '<div class="fs-mini"><button id="fs-savefilter">★ Save as filter</button><button id="fs-test">🎉 Test snipe</button><button id="fs-diag">Copy diag</button></div>' +
-      '<details class="fs-sec"><summary>Prices</summary><div class="fs-card" style="margin-top:8px"><div class="fs-cols">' +
-        '<div class="c"><div class="l">EA min</div><div class="v" id="fs-emin">—</div></div>' +
-        '<div class="c"><div class="l">EA max</div><div class="v" id="fs-emax">—</div></div>' +
-        '<div class="c"><div class="l">Cheapest now</div><div class="v c" id="fs-cheap">—</div></div>' +
-      '</div></div></details>' +
-      '<div class="fs-ch" style="padding:6px 2px 8px">Safety stops</div><div class="fs-rows">' +
-        swRow('🧯', 'Too many results stop (10+)', 'tooManyStop') +
-        '<div class="fs-hint">Manual price only: stops before buying if a search finds 10+ cards at your price - usually a typo like 10,000 instead of 1,000.</div>' +
-        swRow('📏', 'Price range stop', 'rangeStop') +
-        '<div class="fs-hint">Stops if the list price is outside EA\u2019s allowed range for the card.</div>' +
-        swRow('💎', 'Keep special versions', 'keepSpecials') +
-        '<div class="fs-hint">A player search without a rarity can catch a TOTW/special under the normal price: it\u2019s kept unlisted and you get its real value.</div>' +
-      '</div>' +
-      '<details class="fs-sec"><summary>Limits</summary><div class="fs-rows" style="margin-top:8px">' +
-        row('🛑', 'Session buy cap', 'sessionBuyCap') +
-        row('📅', 'Daily buy cap', 'dailyBuyCap') + row('⏱️', 'Run minutes (0=∞)', 'runMinutes') +
-      '</div></details>' +
+      '<div id="fs-act"></div>' +
+      '<div class="fs-run"><div><span>Bought</span><b id="fs-s-buys">0</b></div><div><span>Searches</span><b id="fs-s-sr">0</b></div><div><span>Est. profit</span><b id="fs-s-est">—</b></div><div><span>Coins net</span><b id="fs-s-net">—</b></div></div>' +
+      '<div class="fs-feed"></div>' +
+      '<div class="fs-sect-h" style="margin-top:16px">Saved searches</div><div id="fs-filters"></div>' +
+      '<button class="fs-more" id="fs-savefilter">★ Save the current market search</button>' +
       '<div id="fs-status"></div><pre id="fs-log"></pre>';
   }
-  function filtersView() {
-    var list = filters.length ? filters.map(function (f, i) {
+  function filtersHTML() {
+    return filters.length ? filters.map(function (f, i) {
       var c = f.crit || {}, bits = [];
-      if (c.level) bits.push(String(c.level)); if (c.maskedDefId || c.defId) bits.push('player'); if (c.league) bits.push('league ' + c.league); if (c.nationality) bits.push('nat ' + c.nationality);
+      if (c.level && c.level !== 'any') bits.push(String(c.level)); if (c.maskedDefId) bits.push('player'); if (c.rarities && c.rarities.length) bits.push('rarity'); if (c.league > 0) bits.push('league ' + c.league); if (c.nationality > 0) bits.push('nation ' + c.nationality);
       return '<div class="fs-item"><div><div class="nm">' + esc(f.name) + '</div><div class="de">' + (bits.join(' · ') || 'saved search') + '</div></div>' +
         '<div class="act"><button class="fs-load" data-load="' + i + '">Load</button><button class="fs-del" data-del="' + i + '">✕</button></div></div>';
-    }).join('') : '<div class="fs-empty">No saved filters yet.<br>Search a player in the market, then tap <b>★ Save as filter</b> on the Snipe tab.</div>';
-    return '<div class="fs-ch" style="padding:0 2px 8px">Live Filters — tap-to-load saved searches</div>' +
-      '<button class="fs-btn fs-go" id="fs-savefilter2" style="margin-bottom:12px">★ Save current search as a filter</button>' + list;
+    }).join('') : '<div class="fs-empty" style="padding:14px 10px">Search a player in the market, then save it here to load it again with one tap.</div>';
   }
+
+  // ---------- Market: gauge + trend per card, from the bot's own price checks ----------
+  function gaugeSVG(v) {
+    var pt = function (val, r) { var a = Math.PI * (1 - val / 100); return (100 + r * Math.cos(a)).toFixed(1) + ' ' + (100 - r * Math.sin(a)).toFixed(1); };
+    var arc = function (a, b, col) { return '<path d="M ' + pt(a, 80) + ' A 80 80 0 0 1 ' + pt(b, 80) + '" fill="none" stroke="' + col + '" stroke-width="15" stroke-linecap="round"/>'; };
+    var segs = arc(1.5, 23, '#fb7185') + arc(27, 43, '#fb923c') + arc(47, 58, '#fbbf24') + arc(62, 98.5, '#34d399');
+    if (v == null) return '<g opacity=".3">' + segs + '</g>';
+    var p = pt(v, 80).split(' ');
+    return segs + '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="11" fill="#fff" stroke="#06080d" stroke-width="4"/>';
+  }
+  function miniSpark(pts) {
+    if (pts.length < 2) return '';
+    var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts), span = hi - lo || 1, up = pts[pts.length - 1] >= pts[0];
+    return '<svg class="msp" viewBox="0 0 60 20" preserveAspectRatio="none"><polyline fill="none" stroke="' + (up ? '#34d399' : '#fb7185') + '" stroke-width="2" vector-effect="non-scaling-stroke" points="' +
+      pts.map(function (v, i) { return (i * 60 / (pts.length - 1)).toFixed(1) + ',' + (18 - (v - lo) / span * 16).toFixed(1); }).join(' ') + '"/></svg>';
+  }
+  function marketWord(m) { return !m ? 'not enough checks yet' : m.index >= 60 ? 'prices rising' : m.index <= 40 ? 'prices falling' : 'prices steady'; }
+  function marketView() {
+    return '<div class="fs-mkt"><svg viewBox="0 0 200 118" id="fs-m-gauge"></svg><div class="mv"><b id="fs-m-idx">—</b><span id="fs-m-lbl"></span></div></div>' +
+      '<div class="ds" style="text-align:center;margin:0 6px 14px">Built from the bot’s own price checks in the last 24 h (only cards checked twice or more count). 50 = flat · higher = your cards are getting dearer · lower = cheaper.</div>' +
+      '<div class="fs-sect-h">Cards checked (24 h)</div><div id="fs-m-list"></div>';
+  }
+  function renderMarket($) {
+    var m = marketIndex(priceHist, Date.now()), g = $('fs-m-gauge'), gh = gaugeSVG(m ? m.index : null);
+    if (g && g.__h !== gh) { g.__h = gh; g.innerHTML = gh; }
+    if ($('fs-m-idx')) $('fs-m-idx').textContent = m ? m.index : '—';
+    if ($('fs-m-lbl')) $('fs-m-lbl').textContent = m ? marketWord(m) + ' · ' + (m.pct >= 0 ? '+' : '') + m.pct.toFixed(1) + '% avg over ' + m.cards + ' card' + (m.cards > 1 ? 's' : '') : marketWord(m);
+    var l = $('fs-m-list');
+    if (l) {
+      var tr = cardTrends(priceHist, Date.now()), html = tr.length ? tr.map(function (c) {
+        return '<div class="fs-mrow"><div class="nm">' + esc(c.name || 'Card') + '<div class="de">' + c.n + ' check' + (c.n > 1 ? 's' : '') + ' · ' + ago(c.t) + '</div></div>' + miniSpark(c.pts) +
+          '<div class="pr"><b>' + fmt(c.price) + '</b><span class="' + (c.pct == null ? '' : c.pct >= 0 ? 'up' : 'down') + '">' + (c.pct == null ? '—' : (c.pct >= 0 ? '▲ +' : '▼ ') + c.pct.toFixed(1) + '%') + '</span></div></div>';
+      }).join('') : '<div class="fs-empty">No price checks yet.<br>Every price check the sniper or the Hub makes shows up here.</div>';
+      if (l.__html !== html) { l.__html = html; l.innerHTML = html; }
+    }
+  }
+
+  // ---------- Settings: grouped, each one explained ----------
+  function settingsView() {
+    return section('Sniping',
+        setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the market price minus tax minus this, rounded down to EA’s price steps.') +
+        segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + auto-relist. Transfer list / Unassigned = no price check, you set the buy price below.') +
+        '<div id="fs-keep">' + setting('Buy at or below', ctlNum('keepMax'), 'The most you pay per card (Transfer list / Unassigned mode).') +
+          setting('Min price', ctlNum('keepMin'), 'Cards cheaper than this are skipped. 0 = off.') + '</div>' +
+        segSetting('List for', 'listDur', LIST_DURS, 'How long bought cards are listed.') +
+        rangeSetting('Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches', 'The market moves: the bot checks the price again after about this many searches (the exact number varies).')) +
+      section('Search settings',
+        segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]], '<span id="fs-speedhint">' + speedHint() + '</span> · never faster than this, gaps vary like a person’s. Night is the safest.') +
+        setting('Vary min bid', ctlSw('varyMinBid'), 'A different min bid (0-1,000) on every search so EA always returns fresh results instead of a cached page.') +
+        rangeSetting('Break every ~', 'breakEvery', 20, 120, 5, ' searches', 'A longer pause after about this many searches.') +
+        rangeSetting('Break length', 'breakSec', 15, 300, 5, 's', 'How long that pause lasts (varies ±20%).')) +
+      section('Safety stops',
+        setting('Too many results stop (10+)', ctlSw('tooManyStop'), 'Manual price only: if a search finds 10+ cards at your price, the filter is probably wrong (e.g. 10,000 instead of 1,000). Stops before buying.') +
+        setting('Price range stop', ctlSw('rangeStop'), 'Stops if the list price would be outside EA’s allowed price range for the card.') +
+        setting('Keep special versions', ctlSw('keepSpecials'), 'A player search without a rarity can buy a TOTW/special under the normal card’s price. It’s kept unlisted (not sold at the normal price) and you get its real value.') +
+        setting('Session buy cap', ctlNum('sessionBuyCap'), 'Stop after this many buys in one run.') +
+        setting('Daily buy cap', ctlNum('dailyBuyCap'), 'Stop after this many buys in a day.') +
+        setting('Run minutes', ctlNum('runMinutes'), 'Stop after this many minutes. 0 = no limit.')) +
+      section('Transfer list',
+        setting('Relist expired cards', ctlSw('relistExpired'), 'While sniping, unsold cards go back up automatically.') +
+        setting('Re-price expired before relisting', ctlSw('repriceExpired'), 'Price-check each expired card and relist at today’s price, never below break-even. Off = same price via EA’s Re-list all.') +
+        segSetting('Clear sold items', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]], 'Books the profit and clears sold cards while sniping. When full = only once the list is at 95+ of 100.') +
+        setting('Pack pulls: list if worth at least', ctlNum('packMin'), 'For Hub → List pack pulls. Cheaper cards stay in Unassigned.')) +
+      section('Alerts &amp; display',
+        segSetting('Snipe sound', 'sound', SOUNDS, 'Tap one to hear it. On iPhone, sound starts working after you tap Start.') +
+        setting('Vibrate on snipe', ctlSw('vibrate'), 'Haptic tick on iPhone (iOS 18), vibration on Android.') +
+        setting('Price tags on cards', ctlSw('badges'), 'Shows EA’s AVG value under every card: Club, transfer list, market.') +
+        '<button class="fs-more" id="fs-test">🎉 Test the snipe celebration</button>') +
+      section('Help &amp; data',
+        '<div class="fs-mini"><button id="fs-diag">Copy diagnostics</button><button id="fs-clearsess">Clear sessions</button><button id="fs-reset2">Reset all-time</button></div>' +
+        '<div class="ds" style="margin-top:8px">Diagnostics contain no password or login data. Reset keeps the record of EA’s last captcha / 429 for the safety assistant.</div><pre id="fs-log"></pre>');
+  }
+
   // Hub, top to bottom: profit + activity cards, safety assistant, trades (bought / sold), then
   // the transfer list tools.
   var hubFilter = 'all', hubShowAll = false;
@@ -1257,11 +1341,15 @@
         '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
         '<button class="fs-hb" id="fs-h-packs"><b>📦 List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
       '</div>' +
-      '<div class="fs-rows" style="margin-top:12px">' +
-        swRow('🔎', 'Re-price expired before relisting', 'repriceExpired') +
-        segRow('🧹', 'Clear sold while sniping', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]]) +
-        row('📦', 'List pack pulls worth at least', 'packMin') +
-      '</div>';
+      '<div class="fs-sect-h" style="margin-top:16px">Sessions</div><div id="fs-h-sessions"></div>';
+  }
+  function sessionsHTML() {
+    if (!sessions.length) return '<div class="fs-empty" style="padding:14px 10px">No sessions yet.</div>';
+    var maxAbs = Math.max.apply(null, sessions.map(function (s) { return Math.abs(s.net || s.est || 0); }).concat([1]));
+    return sessions.slice(0, 15).map(function (s) {
+      var val = s.net != null ? s.net : s.est, w = Math.round(Math.abs(val || 0) / maxAbs * 100);
+      return '<div class="fs-sale"><div style="flex:1"><div class="nm">' + signed(val) + ' coins</div><div class="de">' + ago(s.t) + ' · ' + (s.buys || 0) + ' bought · est ' + signed(s.est) + '</div><div class="fs-bar"><i style="width:' + w + '%;background:' + ((val || 0) < 0 ? '#fb7185' : '#34d399') + '"></i></div></div></div>';
+    }).join('');
   }
   function initials(name) { var p = String(name || '?').replace(/[^\p{L}\s]/gu, '').trim().split(/\s+/); return ((p[0] || '?').charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase(); }
   function tradeRows() {
@@ -1318,28 +1406,6 @@
     set('fs-h-exp-s', hub.at ? (hub.expired ? hub.expired + ' expired · ' + (cfg.repriceExpired ? 'price check each (~3-6 searches)' : 'same price') : 'none expired') : 'refresh first');
     set('fs-h-packs-s', hub.packs == null ? 'refresh first' : hub.packsTradable ? hub.packsTradable + ' tradeable player' + (hub.packsTradable > 1 ? 's' : '') + ' · price check each' : 'no tradeable players in unassigned');
   }
-  function statsView() {
-    var totBuys = sessions.reduce(function (a, b) { return a + (b.buys || 0); }, 0);
-    var totEst = sessions.reduce(function (a, b) { return a + (b.est || 0); }, 0);
-    var totNet = sessions.reduce(function (a, b) { return a + (b.net || 0); }, 0);
-    var maxAbs = Math.max(1, Math.max.apply(null, sessions.map(function (s) { return Math.abs(s.net || s.est || 0); }).concat([1])));
-    var rows = sessions.length ? sessions.map(function (s) {
-      var val = s.net != null ? s.net : s.est; var w = Math.round(Math.abs(val || 0) / maxAbs * 100);
-      return '<div class="fs-srow"><div><div style="font-weight:700">' + signed(val) + ' coins</div><div class="de" style="font-size:11px;color:#7f93a8">' + ago(s.t) + ' · ' + (s.buys || 0) + ' bought</div><div class="fs-bar" style="width:140px"><i style="width:' + w + '%;background:' + ((val || 0) < 0 ? '#ff8a5c' : '#19e67d') + '"></i></div></div>' +
-        '<div style="text-align:right;font-size:12px;color:#8ea0b5">est ' + signed(s.est) + '</div></div>';
-    }).join('') : '<div class="fs-empty">No sessions yet.<br>Run the sniper and your results will show here.</div>';
-    return '<div class="fs-hero"><div class="l" style="font-size:9px;letter-spacing:.5px;color:#6f8498;text-transform:uppercase">All-time coins net</div>' +
-      '<div class="big" style="color:' + (totNet < 0 ? '#ff8a5c' : '#19e67d') + '">' + signed(totNet) + '</div>' +
-      '<div class="sub">' + fmtk(life.bought) + ' bought all-time · est profit ' + signed(life.est) + '</div></div>' +
-      '<div class="fs-card"><div class="fs-ch">Totals (last ' + sessions.length + ' sessions)</div><div class="fs-cols">' +
-        '<div class="c"><div class="l">Sessions</div><div class="v">' + sessions.length + '</div></div>' +
-        '<div class="c"><div class="l">Bought</div><div class="v">' + fmtk(totBuys) + '</div></div>' +
-        '<div class="c"><div class="l">Est. profit</div><div class="v ' + (totEst < 0 ? 'r' : 'g') + '">' + signed(totEst) + '</div></div>' +
-      '</div></div>' +
-      '<div class="fs-ch" style="padding:2px 2px 8px">Session history</div>' + rows +
-      '<div class="fs-mini"><button id="fs-clearsess">Clear history</button><button id="fs-reset2">Reset all-time</button></div>';
-  }
-
   // The ⚡ button can be dragged anywhere (so it never covers e.g. the Club tile); the spot is remembered.
   var FAB_KEY = 'futSnipe.fab.v1', fabDraggedAt = 0;
   function placeFab(fab, x, y) {
@@ -1389,11 +1455,11 @@
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
       '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
-      '<div id="fs-tabs">' +
-        '<div class="fs-tab" data-tab="snipe">Snipe</div>' +
-        '<div class="fs-tab" data-tab="hub">Hub</div>' +
-        '<div class="fs-tab" data-tab="filters">Filters</div>' +
-        '<div class="fs-tab" data-tab="stats">Stats</div>' +
+      '<div id="fs-tiles">' +
+        '<div class="fs-tile" data-tab="snipe"><div class="ti" id="fs-ti-run">▶</div><div class="tl">Sniper</div></div>' +
+        '<div class="fs-tile" data-tab="hub"><div class="ti">▦</div><div class="tl">My Hub</div></div>' +
+        '<div class="fs-tile" data-tab="market"><div class="tg"><svg viewBox="0 0 200 118" id="fs-ti-gauge"></svg><b id="fs-ti-idx">—</b></div><div class="tl">Market</div></div>' +
+        '<div class="fs-tile" data-tab="settings"><div class="ti">⚙︎</div><div class="tl">Settings</div></div>' +
       '</div><div id="fs-body"></div>';
     document.body.appendChild(el);
     var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '⚡<span class="dot"></span>';
@@ -1434,7 +1500,7 @@
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
-        case 'fs-savefilter': case 'fs-savefilter2': saveCurrentFilter(); break;
+        case 'fs-savefilter': saveCurrentFilter(); break;
         case 'fs-clearsess': if (window.confirm('Clear the session history?')) { sessions = []; lsSet(SESS_KEY, sessions); redrawTab(); } break;
         case 'fs-reset2': if (window.confirm('Reset all-time stats and session history? This can’t be undone.')) { resetLife(); redrawTab(); } break;
         case 'fs-h-refresh': hubRefreshButton(); break;
@@ -1467,40 +1533,42 @@
         if (fb && !panel.classList.contains('open')) fb.style.display = '';
       }
     }
-    // tabs
-    var tabs = panel.querySelectorAll('.fs-tab');
-    for (var i = 0; i < tabs.length; i++) tabs[i].className = 'fs-tab' + (tabs[i].getAttribute('data-tab') === tab ? ' on' : '');
-    // body (only rebuild on tab change to keep inputs usable)
+    // tiles
+    var tiles = panel.querySelectorAll('.fs-tile');
+    for (var i = 0; i < tiles.length; i++) { var on = tiles[i].getAttribute('data-tab') === tab; if (tiles[i].classList.contains('on') !== on) tiles[i].classList.toggle('on', on); }
+    var mi = marketIndex(priceHist, Date.now()), tg = $('fs-ti-gauge'), tgh = gaugeSVG(mi ? mi.index : null);
+    if (tg && tg.__h !== tgh) { tg.__h = tgh; tg.innerHTML = tgh; }
+    if ($('fs-ti-idx')) $('fs-ti-idx').textContent = mi ? mi.index : '—';
+    if ($('fs-ti-run')) { $('fs-ti-run').textContent = running ? '●' : '▶'; $('fs-ti-run').className = 'ti' + (running ? ' live' : ''); }
+    // body (only rebuilt on view change, so inputs stay usable)
     var body = $('fs-body');
-    if (body.getAttribute('data-tab') !== tab) { body.setAttribute('data-tab', tab); body.innerHTML = tab === 'filters' ? filtersView() : tab === 'stats' ? statsView() : tab === 'hub' ? hubView() : snipeView(); fillFeeds(); if (tab === 'hub' && !hub.at && !running) hubRefreshButton(); }
-    $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
-    if (tab === 'hub') {
-      var hsw = panel.querySelectorAll('[data-sw]'); for (var h = 0; h < hsw.length; h++) hsw[h].className = 'fs-sw' + (cfg[hsw[h].getAttribute('data-sw')] ? ' on' : '');
-      var hsg = panel.querySelectorAll('[data-seg]'); for (h = 0; h < hsg.length; h++) hsg[h].className = 'fs-sg' + (Number(hsg[h].getAttribute('data-val')) === cfg[hsg[h].getAttribute('data-seg')] ? ' on' : '');
-      renderHub($);
+    if (body.getAttribute('data-tab') !== tab) {
+      body.setAttribute('data-tab', tab);
+      body.innerHTML = tab === 'hub' ? hubView() : tab === 'market' ? marketView() : tab === 'settings' ? settingsView() : sniperView();
+      fillFeeds(); if ($('fs-log')) $('fs-log').textContent = logLines.join('\n');
+      if (tab === 'hub' && !hub.at && !running) hubRefreshButton();
     }
-    if (tab !== 'snipe') return;
+    $('fs-coins').textContent = coins() != null ? fmtk(coins()) : '—';
+    // switches / segments reflect cfg in whichever view is open
+    var sws = panel.querySelectorAll('[data-sw]'); for (i = 0; i < sws.length; i++) sws[i].className = 'fs-sw' + (cfg[sws[i].getAttribute('data-sw')] ? ' on' : '');
+    var segs = panel.querySelectorAll('[data-seg]'); for (i = 0; i < segs.length; i++) segs[i].className = 'fs-sg' + (Number(segs[i].getAttribute('data-val')) === cfg[segs[i].getAttribute('data-seg')] ? ' on' : '');
+    if (tab === 'hub') { renderHub($); var sl = $('fs-h-sessions'), shh = sessionsHTML(); if (sl && sl.__html !== shh) { sl.__html = shh; sl.innerHTML = shh; } return; }
+    if (tab === 'market') return renderMarket($);
+    if (tab === 'settings') { if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
 
-    // keep toggles / segments reflecting cfg (body isn't rebuilt on value changes)
-    var i2, sws = panel.querySelectorAll('[data-sw]'); for (i2 = 0; i2 < sws.length; i2++) sws[i2].className = 'fs-sw' + (cfg[sws[i2].getAttribute('data-sw')] ? ' on' : '');
-    var segs = panel.querySelectorAll('[data-seg]'); for (i2 = 0; i2 < segs.length; i2++) { var sb = segs[i2]; sb.className = 'fs-sg' + (Number(sb.getAttribute('data-val')) === cfg[sb.getAttribute('data-seg')] ? ' on' : ''); }
-    if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
-
-    var pr = market.snipe ? profitAt(market.price, market.snipe) : null;
-    var keep = keepMode();
-    if ($('fs-keep')) $('fs-keep').style.display = keep ? '' : 'none';
-    if ($('fs-hero-max')) $('fs-hero-max').textContent = keep ? (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : 'Set price') : market.snipe ? fmt(market.snipe) : (phase === 'checking' ? '…' : (haveSearch() ? 'Ready' : 'Search'));
-    if ($('fs-hero-sub')) $('fs-hero-sub').textContent = keep ? ('your price · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list, not listed') + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '')) : market.snipe ? ('market price ' + fmt(market.price) + (market.fresh ? '' : ' (no fresh listings)') + ' · checked ' + ago(market.checkedAt)) : 'Start checks the market price first';
-    // EA's price steps (50/100/250/500/1000) round the snipe point down, so the real profit at the
-    // snipe point is usually a bit above the target: that's the minimum per card.
-    if ($('fs-hero-prof')) $('fs-hero-prof').textContent = keep || pr == null ? '' : ('min ' + signed(pr) + ' / card after tax · step ' + fmt(stepFor(market.price)));
-    if ($('fs-emin')) $('fs-emin').textContent = stats.eaMin != null ? fmt(stats.eaMin) : '—';
-    if ($('fs-emax')) $('fs-emax').textContent = stats.eaMax != null ? fmt(stats.eaMax) : '—';
-    if ($('fs-cheap')) $('fs-cheap').textContent = stats.cheapest != null ? fmt(stats.cheapest) : '—';
+    // Sniper view
+    var keep = keepMode(), pr = market.snipe && !keep ? profitAt(market.price, market.snipe) : null;
+    if ($('fs-t-name')) $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'Search a player in the market';
+    if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Keep · Unassigned' : 'Keep · Transfer list') : 'List · ' + durLabel(cfg.listDur);
+    if ($('fs-t-price')) $('fs-t-price').textContent = keep ? 'no check' : market.price ? fmt(market.price) : (phase === 'checking' ? '…' : '—');
+    if ($('fs-t-snipe')) $('fs-t-snipe').textContent = keep ? (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : 'set price') : market.snipe ? fmt(market.snipe) : '—';
+    if ($('fs-t-prof')) $('fs-t-prof').textContent = keep ? '—' : pr != null ? signed(pr) : '+' + fmt(cfg.minProfit);
+    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? ('your price' + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · change it in Settings') : market.snipe ? ('step ' + fmt(stepFor(market.price)) + (market.fresh ? '' : ' · no fresh listings') + ' · checked ' + ago(market.checkedAt) + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '')) : 'Start checks the market price first, then snipes below it.';
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
-    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = 'v ' + (stats.est < 0 ? 'r' : 'g'); }
-    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : ''); }
-    if ($('fs-life')) $('fs-life').textContent = 'All-time: ' + fmtk(life.bought) + ' bought · est profit ' + signed(life.est);
+    if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
+    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
+    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = net != null && net < 0 ? 'r' : net ? 'g' : ''; }
+    var fl = $('fs-filters'), fh = filtersHTML(); if (fl && fl.__html !== fh) { fl.__html = fh; fl.innerHTML = fh; }
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
     if ($('fs-act')) $('fs-act').textContent = activity;
     var go = $('fs-start');
@@ -1509,17 +1577,17 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = running
         ? '■ Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
-          : keepMode() ? '▶ Start<span class="sub">buys at ≤ ' + (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
+        : keep ? '▶ Start<span class="sub">buys at ≤ ' + (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
-      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a filter') : 'Open the FUT Web App & sign in');
-      $('fs-status').style.color = running ? '#19e67d' : stopReason ? '#ff9a6b' : '#8ea0b5';
+      $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a saved search') : 'Open the FUT Web App & sign in');
+      $('fs-status').style.color = running ? '#34d399' : stopReason ? '#fb923c' : '#8b95a8';
     }
   }
 
-  setInterval(function () { if (tab === 'hub' && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
+  setInterval(function () { if ((tab === 'hub' || tab === 'market') && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
   function boot(tries) {
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
