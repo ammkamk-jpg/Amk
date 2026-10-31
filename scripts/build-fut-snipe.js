@@ -44,7 +44,7 @@ const body = parts.map((p) => read(`fut-snipe/src/${p}.js`).replace(/\s+$/, ""))
 const assetDir = path.join(root, "fut-snipe/assets/mascot");
 if (fs.existsSync(path.join(assetDir, "idle.webp"))) {
   const b64 = (f) => fs.readFileSync(path.join(assetDir, f)).toString("base64");
-  const PACK_VERSION = "2.0.0";
+  const PACK_VERSION = "2.1.0";
   const packRaw = "https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/tangatolga-mascot.user.js";
   const pack = `// ==UserScript==
 // @name         TangaTolga Mascot
@@ -66,7 +66,7 @@ window.__ttMascot = ${JSON.stringify({
     win: "data:image/webp;base64," + b64("win.webp"),
     sad: "data:image/webp;base64," + b64("sad.webp"),
     winMp3: b64("win.mp3"),
-    sadMp3: b64("sad.mp3"),
+    sadMp3: fs.existsSync(path.join(assetDir, "sad.mp3")) ? b64("sad.mp3") : "", // optional: a silent pout is fine
   })};
 `;
   fs.writeFileSync(path.join(root, "tangatolga-mascot.user.js"), pack);
