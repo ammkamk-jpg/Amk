@@ -160,6 +160,15 @@
     '#fs-fx .fx-name{margin-top:10px;font-size:20px;font-weight:900;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.6);animation:fxup .5s .25s both}' +
     '#fs-fx .fx-meta{margin-top:6px;font-size:16px;font-weight:800;color:#d5dce8;animation:fxup .5s .35s both}#fs-fx .fx-meta span{color:' + C_OK + ';background:rgba(6,8,13,.7);border:1px solid rgba(52,211,153,.5);border-radius:999px;padding:3px 10px;margin-left:6px}' +
     '@keyframes fxup{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}' +
+    // mascot: idle on the running screen, reactions pop up from the bottom
+    '.tt-mascot{width:var(--tt-ms,160px);animation:ttfloat 3.6s ease-in-out infinite;filter:drop-shadow(0 12px 26px rgba(var(--tt-g1),.35))}' +
+    '.tt-mascot img,#tt-react img{width:100%;display:block;-webkit-mask-image:linear-gradient(#000 78%,transparent);mask-image:linear-gradient(#000 78%,transparent)}' +
+    '@keyframes ttfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}' +
+    '#tt-react{position:fixed;left:50%;bottom:0;z-index:2147483647;width:min(68vw,300px);transform:translate(-50%,105%);opacity:0;pointer-events:none;transition:transform .45s cubic-bezier(.2,1.3,.4,1),opacity .35s}' +
+    '#tt-react.show{transform:translate(-50%,0);opacity:1}#tt-react.out{transform:translate(-50%,105%);opacity:0;transition:transform .5s ease-in,opacity .5s}' +
+    '.tt-bubble{position:absolute;top:5%;right:-6%;max-width:72%;transform:rotate(4deg) scale(0);transform-origin:0 100%;background:#fff;color:#2b0f2a;border-radius:18px 18px 18px 4px;padding:8px 13px;box-shadow:0 8px 24px rgba(0,0,0,.45);font:900 19px/1.15 ' + FONT + ';animation:ttbub .5s .25s cubic-bezier(.2,1.6,.4,1) forwards}' +
+    '.tt-bubble span{display:block;margin-top:2px;font-size:11.5px;font-weight:800;color:' + C_A1 + '}#tt-react.sad .tt-bubble{right:auto;left:-6%;transform-origin:100% 100%;border-radius:18px 18px 4px 18px;transform:rotate(-4deg) scale(0);animation-name:ttbub2}' +
+    '@keyframes ttbub{to{transform:rotate(4deg) scale(1)}}@keyframes ttbub2{to{transform:rotate(-4deg) scale(1)}}' +
     // themes: wallpaper + petals behind the panel and the running screen
     '.tt-bg{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}#fs-panel>*:not(.tt-bg),#fs-lock>*:not(.tt-bg){position:relative;z-index:1}' +
     '.tt-wall{display:none;background-size:cover;background-position:center;filter:blur(var(--tt-blur));transform:scale(1.08)}.has-wall>.tt-wall{display:block}' +

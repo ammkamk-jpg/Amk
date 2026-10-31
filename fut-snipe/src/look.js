@@ -21,7 +21,10 @@
     var t = THEMES[cfg.theme | 0] || THEMES[0], st = document.getElementById('tt-theme');
     if (!st) { st = document.createElement('style'); st.id = 'tt-theme'; document.head.appendChild(st); }
     st.textContent = ':root{--tt-a1:' + t.a1 + ';--tt-a2:' + t.a2 + ';--tt-g1:' + t.g1 + ';--tt-g2:' + t.g2 + ';--tt-bg:' + t.bg +
-      ';--tt-dim:' + (cfg.wallDim / 100) + ';--tt-blur:' + cfg.wallBlur + 'px}';
+      ';--tt-dim:' + (cfg.wallDim / 100) + ';--tt-blur:' + cfg.wallBlur + 'px;--tt-ms:' + cfg.mascotSize + 'px}';
+    // running screen: the mascot instead of the radar (or back), when the switch changes
+    var spot = document.querySelector('#fs-lock .radar, #fs-lock .tt-mascot');
+    if (spot && spot.classList.contains('tt-mascot') !== mascotOn()) spot.outerHTML = mascotIdleHTML();
     var wall = wallData();
     ['fs-panel', 'fs-lock'].forEach(function (id) {
       var host = document.getElementById(id); if (!host) return;

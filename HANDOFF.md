@@ -2,7 +2,7 @@
 
 Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don't code until I say go."
 
-## Status (v4.2.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
+## Status (v4.3.0 "TangaTolga Sniper", branch `fut-snipe-one-button`)
 - Done: script split into `fut-snipe/src/*.js`; `npm run build:fut-snipe` joins them into `fut-snipe.user.js` (never edit that file by hand). One Start button with price check (binary search, stale-outlier safe), snipe point, buy-all, relist with duration setting, periodic re-check, on-screen + console steps, closest() button fix, reset on Start, price tags on cards (EA prices only).
 - v2.6.0: re-check slider 30-120, randomised gaps/breaks/re-checks, live feed (one line per search, clears after ~20 with a short pause), relists expired transfer-list cards via EA's Re-list all.
 - v2.7.0: real web-app diag showed cards are drawn on <canvas> with no player id in the DOM, but each `li.listFUTItem` row has a hidden `.ut-item-view--stats` row "AVG <coins>". Price tags now show that value on every card (Club too), no searches. Search-based club pricing and the per-id price cache were removed. ⚡ button is draggable (position saved). Diag now lists all `services` keys and Item methods (check for `relistExpiredAuctions` / `requestTransferItems`).
@@ -18,6 +18,7 @@ Start a new chat and say: "Read HANDOFF.md in ammkamk-jpg/Amk and continue. Don'
 - v4.0.0: UI restructured like Simple Trader (layout ideas only, own branding): 4 top tiles Sniper / My Hub / Market / Settings. Sniper = target card + Start + run stats + feed + saved searches (old Filters tab). Hub = dashboard + sessions (old Stats tab). Market = gauge + per-card trends from the bot's own price checks (priceHist `futSnipe.priceHist.v1`, pricing.js cardTrends/marketIndex). Settings = sections with explanations (all settings moved off the Sniper view).
 - v4.1.0: search gaps are a random value inside a range per speed (Normal 3.5-5.5s, Night 6.5-9.5s, Turbo 0.6-1.2s; tempo mood leans within it; price-check searches x1.35). Manual sell price (cfg.sellPrice, 0 = auto): lists there, snipe point = snipePoint(min(checked, manual)) (sellAndSnipe), editable on the Sniper card mid-run (applySell). Price check starts at the cheapest fresh listing.
 - v4.2.0: look.js themes (Classic / Sakura default / Neon) via CSS variables --tt-a1/a2/g1/g2/bg; user-picked wallpaper (scaled to 1400px JPEG in `futSnipe.wall.v1`) behind panel + running screen with dim/blur and frosted cards; falling petals. Wallpaper shown via data: URL - if EA's CSP ever blocks it, nothing else breaks.
+- v4.3.0: animated mascot (mascot.js). Assets in fut-snipe/assets/mascot/ (from the user's Gemini clip: idle = 8.6-10.0 s ping-pong, win = 1.75-4.9 s, sad = 5.0-8.0 s; chromakey 0x36DF34 sim .19 blend .04 + alpha cleanup, 240 px, 12 fps animated WebP; mp3 voice) are embedded by the build as MASCOT_ASSETS right after mascot.js (must come before ui.js boots). Idle replaces the radar on the running screen; celebrate() -> win reaction with bubble + voice; requestStop -> sad. Settings -> Look: Mascot, size, voice, test.
 - Pure price math is in `fut-snipe/src/pricing.js`, tested by `test/fut-snipe.test.js` (`npm test`).
 - Not yet tested on the real EA web app (user was still on 2.4.1 when sending diag).
 - fut.gg prices: user asked for them (2026-10-28); not done. Needs the user's decision (see Not wanted).
@@ -59,7 +60,7 @@ Don't re-push the whole file each time. First task after "go": split the script 
 ## Suggested second message (after the new session replies)
 > go. Answers: use the 2nd-cheapest fresh listing as the market price; buy anything at or below the snipe point; default relist duration 1h. First split the script into small files, then build the one-button flow.
 
-## Next: animated mascot (user's request, 2026-10-31)
+## Animated mascot (done in v4.3.0; notes kept for new clips)
 User wants a slot-machine-style animated anime character in the bot: idles in a corner (breathing, blinking, hair moving) and celebrates each snipe saying "uwuuu~". Must be an ORIGINAL character, clearly adult; Google's filters decide the outfit.
 - If `GEMINI_API_KEY` is set in the environment: generate the still with the Gemini image model, then image-to-video with Veo (idle 4-8 s seamless loop; win 2-4 s with the "uwuuu~" voice; optional sad 2-3 s). Plain bright-green background, static camera. Veo via the API needs billing enabled: confirm cost with the user before generating video.
 - Otherwise the user sends idle.mp4 / win.mp4 / sad.mp4 in the chat.

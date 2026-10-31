@@ -49,6 +49,7 @@
 
   // The over-the-top part: flash, shockwaves, "SNIPED!", a burst of coins + confetti, screen shake.
   function celebrate(name, price, profit) {
+    mascotReact('win', 'uwuuu~ 💖', name + (profit != null ? ' · +' + fmt(profit) : ' · ' + fmt(price)));
     if (cfg.vibrate) vibrate();
     playSound(cfg.sound | 0);
     try {

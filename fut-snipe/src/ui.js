@@ -119,6 +119,10 @@
         rangeSetting('Wallpaper dim', 'wallDim', 20, 85, 5, '%', 'Darker = easier to read.') +
         rangeSetting('Wallpaper blur', 'wallBlur', 0, 20, 1, 'px', '') +
         setting('Wallpaper on the running screen', ctlSw('wallRun'), '') +
+        (typeof MASCOT_ASSETS === 'object' && MASCOT_ASSETS ? setting('Mascot', ctlSw('mascot'), 'She idles on the running screen, cheers \u201cuwuuu~\u201d on every snipe and pouts when the bot stops.') +
+          segSetting('Mascot size', 'mascotSize', MASCOT_SIZES, '') +
+          setting('Mascot voice', ctlSw('mascotVoice'), 'On iPhone, sound starts working after you tap Start (or the test button).') +
+          '<button class="fs-more" id="fs-mascot-test">💖 Test her</button>' : '') +
         setting('Falling petals', ctlSw('petals'), 'Cherry blossoms drifting in the background, in the theme\u2019s colours.')) +
       section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the sell price minus tax minus this, rounded down to EA’s price steps.') +
@@ -319,7 +323,7 @@
     makeFabDraggable(fab);
 
     var lock = document.createElement('div'); lock.id = 'fs-lock';
-    lock.innerHTML = lookLayers() + '<div class="radar"></div><div class="lbig">TangaTolga <b>hunting</b></div>' +
+    lock.innerHTML = lookLayers() + mascotIdleHTML() + '<div class="lbig">TangaTolga <b>hunting</b></div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
@@ -344,8 +348,8 @@
       if (!tg || !el.contains(tg)) return;
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
-      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } if (sw === 'wallRun' || sw === 'petals') applyLook(); save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } if (seg === 'theme') applyLook(); save(); render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } if (sw === 'wallRun' || sw === 'petals' || sw === 'mascot') applyLook(); save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } if (seg === 'theme' || seg === 'mascotSize') applyLook(); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
@@ -354,6 +358,7 @@
         case 'fs-sell': askSellPrice(); break;
         case 'fs-wall-pick': var fi = document.getElementById('fs-wall-file'); if (fi) fi.click(); break;
         case 'fs-wall-rm': removeWallpaper(); break;
+        case 'fs-mascot-test': unlockAudio(); mascotReact('win', 'uwuuu~ 💖', 'Test snipe · +662'); break;
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
