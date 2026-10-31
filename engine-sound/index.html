@@ -163,6 +163,7 @@
   <section class="card">
     <div class="sect">CAR</div>
     <div class="cars" id="cars"></div>
+    <div class="row"><div><label>Listen from</label><small>Cabin = sitting in the car (deep, muffled). Outside = like a street video.</small></div><div class="seg" data-k="view"><button data-v="cabin">Cabin</button><button data-v="outside">Outside</button></div></div>
     <div class="row"><div><label>Speed from</label><small>Test = drive it parked with the pedal</small></div><div class="seg" data-k="source"><button data-v="gps">GPS</button><button data-v="test">Test</button></div></div>
     <div class="row"><div><label>Lag fix</label><small>Plays the sound for where your speed will be. Raise it if the sound comes late.</small></div><input type="range" data-k="lead" min="0" max="1.6" step="0.1"><span class="val" id="v-lead"></span></div>
     <div class="row"><div><label>Phone motion sensor</label><small>Instant throttle on a phone (not on the car screen). Phone must be mounted.</small></div><div class="seg" data-k="motion"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
@@ -189,6 +190,7 @@ class EngineDSP {
     this.starter = 0; this.stPh = 0; this.limPh = 0; this.wPh = 0; this.nlp = 0;
     this.popsLvl = 1; this.intensity = .6; this.pops = [];
     this.wEff = .1; this.rasp = 0; this.drive = 1; this.intG = 0; this.tsK = 1;
+    this.wob = 0; this.wobT = 0; this.wobM = 1; this.rl = 0;
     // one exhaust pulse: a quick rise, then a decay (blowdown)
     this.shape = new Float32Array(1026);
     for (var i = 0; i <= 1025; i++) { var x = Math.min(1, i / 1024); this.shape[i] = x < .16 ? Math.pow(Math.sin(Math.PI / 2 * x / .16), 2) : Math.exp(-(x - .16) * 5.5) * (1 - x) / .84; }
@@ -217,6 +219,7 @@ class EngineDSP {
     var sr = this.sr, n = e.fire.length, i, self = this;
     this.e = e; this.n = n;
     this.off = new Float64Array(n); this.gainC = new Float64Array(n); this.amp = new Float64Array(n); this.prev = new Float64Array(n); this.bank = Int32Array.from(e.bank);
+    this.tj = new Float64Array(n); this.wf = new Float64Array(n).fill(1);
     for (i = 0; i < n; i++) {
       this.off[i] = (e.fire[i] + (this.r() - .5) * 2 * e.offJit / n + 1) % 1;      // header length differences
       this.gainC[i] = 1 + (this.r() * 2 - 1) * e.cylVar;                             // no two cylinders are the same
@@ -225,7 +228,7 @@ class EngineDSP {
     this.nb = e.pan.length; this.bin = new Float64Array(this.nb); this.B = [];
     for (i = 0; i < this.nb; i++) {
       var hl = Math.max(4, Math.round(2 * e.header[i] / 480 * sr)), pl = Math.max(4, Math.round(2 * e.pipe[i] / 480 * sr)), pan = e.pan[i];
-      this.B.push({ hb: new Float32Array(hl), hi: 0, hz: 0, pb: new Float32Array(pl), pi: 0, pz: 0, ts: 0, muf: this.bq(), gl: Math.sqrt((1 - pan) / 2), gr: Math.sqrt((1 + pan) / 2) });
+      this.B.push({ hb: new Float32Array(hl), hi: 0, hz: 0, pb: new Float32Array(pl), pi: 0, pz: 0, ts: 0, n1: 0, n2: 0, muf: this.bq(), gl: Math.sqrt((1 - pan) / 2), gr: Math.sqrt((1 + pan) / 2) });
     }
     this.bL = e.body.map(function (p) { var o = self.bq(); self.coef(o, 2, p[0], p[1], p[2]); return o; });
     this.bR = e.body.map(function (p) { var o = self.bq(); self.coef(o, 2, p[0], p[1], p[2]); return o; });
@@ -250,7 +253,7 @@ class EngineDSP {
   pop(b, a) {
     if (this.pops.length > 12 || this.popsLvl <= 0) return;
     var sr = this.sr, len = (.0025 + this.r() * .009) * sr;
-    this.pops.push({ b: b, n: -((this.r() * .01 * sr) | 0), a: a * this.e.popGain * (.55 + .7 * this.r()), e1: 1, k1: Math.exp(-1 / len), e2: .9, k2: Math.exp(-1 / (len * 2.2)), ph: 0, w: 6.283185307179586 * (60 + this.r() * 110) / sr });
+    this.pops.push({ b: b, n: -((this.r() * .01 * sr) | 0), a: a * this.e.popGain * (.55 + .7 * this.r()), e1: 1, k1: Math.exp(-1 / len), lp: 0, e2: .9, k2: Math.exp(-1 / (len * 2.2)), ph: 0, w: 6.283185307179586 * (60 + this.r() * 110) / sr });
   }
   fire(k, cut, rn, load) {
     var e = this.e, a;
@@ -261,8 +264,11 @@ class EngineDSP {
         var rate = e.popRate * this.popsLvl * ((1.5 + 40 * this.lift) * revs + (cut && this.cut <= 0 ? 14 : 0));
         if (this.r() < rate / perSec) this.pop(this.bank[k], .35 + .65 * Math.min(1, this.lift + .2));
       }
-    } else a = (.24 + .76 * load) * (1 + e.jitter * (this.r() * 2 - 1) * Math.max(.25, 1.4 - 1.5 * rn));
+    } else a = (.24 + .76 * load) * (1 + e.jitter * (this.r() * 2 - 1) * Math.max(.3, 1.4 - 1.4 * rn));
     this.amp[k] = a * this.gainC[k];
+    // no two combustions are alike: each one a touch late or early, and a bit longer or shorter
+    this.tj[k] = this.r() * e.tJit * (1.4 - .6 * rn);
+    this.wf[k] = 1 + (this.r() - .5) * .3;
   }
   ctrl(rn, load) {
     var e = this.e, B = this.B;
@@ -278,14 +284,17 @@ class EngineDSP {
     this.rasp = e.rasp * (.2 + .8 * load) * (.35 + .65 * rn) * (.4 + this.intensity);
     this.drive = 1 + e.drive * (.3 + .7 * this.intensity) * (.4 + .6 * load);
     this.intG = e.intake * (.12 + .88 * Math.pow(load, 1.3)) * (.15 + rn);
-    this.coef(this.intBp, 1, e.intakeF * (.75 + .5 * rn), 2);
+    this.coef(this.intBp, 1, e.intakeF * (.75 + .5 * rn), 1.3);
     this.wEff = Math.min(e.pulseW, e.pulseMs / 1000 * Math.max(1, this.rpm) / 120);
+    // revs are never dead steady: a slow random wander (more at idle)
+    if (this.r() < .012) this.wobT = (this.r() * 2 - 1) * e.wander * (1.6 - Math.min(1, rn));
+    this.wob += (this.wobT - this.wob) * .04; this.wobM = 1 + this.wob;
   }
   process(L, R, N) {
     var e = this.e, i;
     if (!e) { for (i = 0; i < N; i++) { L[i] = 0; R[i] = 0; } return; }
     var sr = this.sr, n = this.n, nb = this.nb, B = this.B, shape = this.shape, bin = this.bin, off = this.off, prev = this.prev, amp = this.amp, bank = this.bank;
-    var kR = this.kR, kL = this.kL, redl = e.redline, TAU = 6.283185307179586, pre = e.pre, b, k;
+    var kR = this.kR, kL = this.kL, redl = e.redline, TAU = 6.283185307179586, pre = e.pre, tj = this.tj, wf = this.wf, b, k;
     for (i = 0; i < N; i++) {
       this.rpm += (this.rpmT - this.rpm) * kR; this.load += (this.loadT - this.load) * kL;
       var rpm = this.rpm, load = this.load, lim = 0;
@@ -295,7 +304,7 @@ class EngineDSP {
       }
       var rn = rpm / redl;
       if ((this.cnt++ & 63) === 0) this.ctrl(rn, load);
-      this.ph += rpm / 120 / sr; if (this.ph >= 1) this.ph -= 1;
+      this.ph += rpm * this.wobM / 120 / sr; if (this.ph >= 1) this.ph -= 1;
       var cutNow = lim || this.starter || this.cut > 0;
       if (this.cut > 0) { if (this.cut === this.popAt && this.popPow > 0) this.pop((this.r() * nb) | 0, this.popPow); this.cut--; }
       for (b = 0; b < nb; b++) bin[b] = 0;
@@ -304,13 +313,15 @@ class EngineDSP {
         var d = ph - off[k]; if (d < 0) d += 1;
         if (d < prev[k]) this.fire(k, cutNow, rn, load);
         prev[k] = d;
-        if (d < w) { var v = shape[(d / w * 1024) | 0] * amp[k]; bin[bank[k]] += v; sum += v; }
+        var dd = d - tj[k];
+        if (dd >= 0) { var wk = w * wf[k]; if (dd < wk) { var v = shape[(dd / wk * 1024) | 0] * amp[k]; bin[bank[k]] += v; sum += v; } }
       }
       var nz = this.r() * 2 - 1; this.nlp += (nz - this.nlp) * .18; var nzh = nz - this.nlp;
       var oL = 0, oR = 0;
       for (b = 0; b < nb; b++) {
-        var S = B[b], x = bin[b] * pre;
-        x += x * nzh * this.rasp * 3;                                        // turbulence in the gas pulse
+        var S = B[b], x = bin[b] * pre, nb2 = this.r() * 2 - 1;
+        S.n1 += (nb2 - S.n1) * .2; S.n2 += (S.n1 - S.n2) * .025;             // gas turbulence: band-limited noise, not fizz
+        x += x * (S.n1 - S.n2) * this.rasp * 4;
         if (e.turbo) { S.ts += (x - S.ts) * this.tsK; x = S.ts; }
         var ho = S.hb[S.hi]; S.hz += (ho - S.hz) * e.loopLp; var h = x + e.reflH * S.hz; S.hb[S.hi] = h; if (++S.hi === S.hb.length) S.hi = 0;   // headers
         var po = S.pb[S.pi]; S.pz += (po - S.pz) * e.loopLp; var p = h + e.refl * S.pz; S.pb[S.pi] = p; if (++S.pi === S.pb.length) S.pi = 0;   // pipes
@@ -320,18 +331,20 @@ class EngineDSP {
       for (var q = this.pops.length - 1; q >= 0; q--) {                    // afterfire pops in the exhaust
         var P = this.pops[q];
         if (P.n < 0) { P.n++; continue; }
-        var pv = P.a * (P.e1 * nz + P.e2 * Math.sin(P.ph)); P.ph += P.w; P.e1 *= P.k1; P.e2 *= P.k2;
+        P.lp += (nz - P.lp) * .3;                                             // the bang comes out through the pipes: no hiss
+        var pv = P.a * (P.e1 * P.lp * 1.8 + P.e2 * Math.sin(P.ph)); P.ph += P.w; P.e1 *= P.k1; P.e2 *= P.k2;
         oL += pv * B[P.b].gl; oR += pv * B[P.b].gr;
         if (P.e2 < .002) this.pops.splice(q, 1);
       }
       var c = this.f(this.intBp, sum * pre * (.55 + .9 * nz)) * this.intG;  // intake howl
       if (e.turbo) {
-        var bo = this.boost; this.wPh += (1400 + 7600 * bo) / sr; if (this.wPh >= 1) this.wPh -= 1;
-        c += Math.sin(TAU * this.wPh) * .03 * bo * bo + this.f(this.whBp, nz) * .1 * bo * (.3 + load);
+        var bo = this.boost; this.wPh += (1400 + 5200 * bo) / sr; if (this.wPh >= 1) this.wPh -= 1;
+        c += Math.sin(TAU * this.wPh) * .008 * bo * bo + this.f(this.whBp, nz) * .04 * bo * (.3 + load);
         if (this.flut > .003) { this.flut *= this.flK; this.flPh += (13 + 12 * this.flut) / sr; var fm = .5 + .5 * Math.sin(TAU * this.flPh); c += this.f(this.flBp, nz) * this.flut * fm * fm * fm * .6; }
       }
       if (this.starter) { this.stPh += 1050 / sr; if (this.stPh >= 1) this.stPh -= 1; c += (Math.sin(TAU * this.stPh) + .4 * Math.sin(2 * TAU * this.stPh)) * .05 * (.65 + .35 * Math.sin(TAU * ph * n)); }
       c += nzh * e.mech * rn;                                                 // valvetrain
+      this.rl += (nz - this.rl) * .03; c += this.rl * e.rumble * (.3 + .7 * load) * Math.min(1, rn * 3);   // deep body rumble
       oL += c; oR += c;
       var mono = (oL + oR) * .5; oL += (mono - oL) * e.cross; oR += (mono - oR) * e.cross;
       for (var j = 0; j < this.bL.length; j++) { oL = this.f(this.bL[j], oL); oR = this.f(this.bR[j], oR); }
@@ -358,9 +371,9 @@ var CARS = (function () {
       accel: 7.2, vmax: 78, revUp: 6500, revDown: 3600, shiftMs: 95, shiftPop: .9, blip: .75, launch: 3400, flare: 1.95, crank: 750,
       // cross-plane V8, firing order 1-5-4-2-6-3-7-8 (1-4 right bank, 5-8 left): each bank fires unevenly = the burble
       dsp: { fire: even(8), bank: [0, 1, 0, 0, 1, 0, 1, 1], pan: [.42, -.42], cross: .2, header: [.62, .56], pipe: [3.3, 3.15],
-        reflH: -.3, refl: -.5, loopLp: .42, pulseW: .15, pulseMs: 6.5, jitter: .14, cylVar: .1, offJit: .03,
-        lpMin: 700, lpMax: 4400, body: [[95, 1.1, 6], [300, 1.6, 3], [1300, 1.4, -2], [2700, 2, 3]],
-        rasp: .45, drive: 3, intake: .22, intakeF: 380, mech: .012, turbo: 0, popRate: .55, popGain: 1.1, limHz: 11, pre: .2, gain: 1 }
+        reflH: -.22, refl: -.38, loopLp: .32, pulseW: .15, pulseMs: 6.5, jitter: .14, cylVar: .1, offJit: .03, tJit: .006, wander: .006, rumble: .22,
+        lpMin: 700, lpMax: 4400, body: [[95, 1.1, 6], [300, 1.6, 3], [1300, 1.4, -2], [2700, 2, 1]],
+        rasp: .18, drive: 1.4, intake: .22, intakeF: 380, mech: .006, turbo: 0, popRate: .55, popGain: .6, limHz: 11, pre: .2, gain: 1 }
     },
     svj: {
       name: 'Aventador SVJ', sub: '6.5 V12 · NA · 8,700 rpm', badge: 'V12 6.5', color: '#c6ff00',
@@ -368,18 +381,18 @@ var CARS = (function () {
       accel: 9.8, vmax: 97, revUp: 9500, revDown: 4800, shiftMs: 140, shiftPop: 1.2, blip: .9, launch: 4200, flare: 2.1, crank: 650,
       // 60-degree V12: perfectly even, the banks take turns. Single-clutch ISR box: brutal shifts.
       dsp: { fire: even(12), bank: alt(12), pan: [.22, -.22], cross: .25, header: [.45, .47], pipe: [1.6, 1.66],
-        reflH: -.3, refl: -.42, loopLp: .55, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .06, offJit: .015,
-        lpMin: 1600, lpMax: 9000, body: [[180, 1, 3], [650, 1.2, 4], [1500, 1.3, 3], [3300, 1.8, 5]],
-        rasp: .6, drive: 2.6, intake: .35, intakeF: 520, mech: .02, turbo: 0, popRate: .45, popGain: 1.3, limHz: 14, pre: .15, gain: 1 }
+        reflH: -.22, refl: -.32, loopLp: .42, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .06, offJit: .015, tJit: .003, wander: .004, rumble: .14,
+        lpMin: 1600, lpMax: 9000, body: [[180, 1, 3], [650, 1.2, 4], [1500, 1.3, 3], [3300, 1.8, 2]],
+        rasp: .22, drive: 1.3, intake: .35, intakeF: 520, mech: .01, turbo: 0, popRate: .45, popGain: .72, limHz: 14, pre: .15, gain: 1.28 }
     },
     f812: {
       name: '812 Superfast', sub: '6.5 V12 · NA · 8,900 rpm', badge: 'V12 6.5', color: '#ffd400',
       idle: 1000, redline: 8900, maxDial: 10000, ratios: [3.08, 2.19, 1.63, 1.29, 1.03, 0.84, 0.63], final: 4.44, tyre: 2.29,
       accel: 9.6, vmax: 94, revUp: 11000, revDown: 5400, shiftMs: 45, shiftPop: .35, blip: .8, launch: 3800, flare: 1.75, crank: 600,
       dsp: { fire: v12at(65), bank: alt(12), pan: [.35, -.35], cross: .2, header: [.4, .4], pipe: [2.1, 2.15],
-        reflH: -.28, refl: -.38, loopLp: .62, pulseW: .1, pulseMs: 3.5, jitter: .035, cylVar: .04, offJit: .006,
-        lpMin: 2000, lpMax: 11000, body: [[260, 1, 2], [1100, 1.2, 3], [2400, 1.5, 4], [4200, 2.2, 5]],
-        rasp: .25, drive: 1.7, intake: .55, intakeF: 700, mech: .02, turbo: 0, popRate: .15, popGain: .8, limHz: 16, pre: .14, gain: 1.6 }
+        reflH: -.2, refl: -.3, loopLp: .5, pulseW: .1, pulseMs: 3.5, jitter: .035, cylVar: .04, offJit: .006, tJit: .0025, wander: .003, rumble: .1,
+        lpMin: 2000, lpMax: 11000, body: [[260, 1, 2], [1100, 1.2, 3], [2400, 1.5, 4], [4200, 2.2, 3]],
+        rasp: .1, drive: .9, intake: .55, intakeF: 700, mech: .01, turbo: 0, popRate: .15, popGain: .45, limHz: 16, pre: .14, gain: 1.95 }
     },
     m4: {
       name: 'M4 Competition', sub: '3.0 I6 twin-turbo · 7,200 rpm', badge: 'I6 TWIN TURBO', color: '#2fa4e7',
@@ -387,22 +400,49 @@ var CARS = (function () {
       accel: 7.6, vmax: 81, revUp: 7000, revDown: 4200, shiftMs: 70, shiftPop: .8, blip: .7, launch: 3000, flare: 1.6, crank: 700,
       // inline-6, firing order 1-5-3-6-2-4; cylinders 1-3 and 4-6 each feed one turbo
       dsp: { fire: even(6), bank: alt(6), pan: [.15, -.15], cross: .3, header: [.55, .6], pipe: [2.7, 2.75],
-        reflH: -.3, refl: -.48, loopLp: .45, pulseW: .14, pulseMs: 5, jitter: .06, cylVar: .07, offJit: .02,
-        lpMin: 900, lpMax: 5200, body: [[140, 1, 4], [520, 1.4, 3], [1900, 1.6, 4], [3400, 2, 2]],
-        rasp: .55, drive: 2.8, intake: .2, intakeF: 450, mech: .02, turbo: 1, popRate: .6, popGain: 1, limHz: 12, pre: .2, gain: 1 }
+        reflH: -.22, refl: -.36, loopLp: .34, pulseW: .14, pulseMs: 5, jitter: .06, cylVar: .07, offJit: .02, tJit: .004, wander: .005, rumble: .16,
+        lpMin: 900, lpMax: 5200, body: [[140, 1, 4], [520, 1.4, 3], [1900, 1.6, 2], [3400, 2, 1]],
+        rasp: .2, drive: 1.3, intake: .2, intakeF: 450, mech: .008, turbo: 1, popRate: .6, popGain: .55, limHz: 12, pre: .2, gain: 1.15 }
     },
     gt3: {
       name: 'GT3 Flat-6', sub: '4.0 boxer 6 · NA · 9,000 rpm', badge: 'FLAT-6 4.0', color: '#ff8a1f',
       idle: 900, redline: 9000, maxDial: 10000, ratios: [3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84], final: 4.0, tyre: 2.12,
       accel: 8.6, vmax: 88, revUp: 10500, revDown: 6000, shiftMs: 40, shiftPop: .4, blip: .85, launch: 4500, flare: 1.6, crank: 600,
       dsp: { fire: even(6), bank: alt(6), pan: [.35, -.35], cross: .2, header: [.35, .35], pipe: [1.9, 1.95],
-        reflH: -.3, refl: -.4, loopLp: .6, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .05, offJit: .01,
-        lpMin: 1800, lpMax: 10000, body: [[220, 1, 2], [900, 1.3, 2], [1800, 1.5, 5], [3800, 2, 4]],
-        rasp: .4, drive: 2.1, intake: .45, intakeF: 620, mech: .03, turbo: 0, popRate: .2, popGain: .8, limHz: 15, pre: .16, gain: 1.55 }
+        reflH: -.22, refl: -.3, loopLp: .46, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .05, offJit: .01, tJit: .003, wander: .004, rumble: .12,
+        lpMin: 1800, lpMax: 10000, body: [[220, 1, 2], [900, 1.3, 2], [1800, 1.5, 4], [3800, 2, 2]],
+        rasp: .15, drive: 1.1, intake: .45, intakeF: 620, mech: .015, turbo: 0, popRate: .2, popGain: .45, limHz: 15, pre: .16, gain: 2.05 }
     }
   };
 })();
 // ==/CARS==
+
+// ==VIEW==
+// Where you hear the car from. Cabin: inside the car (the body soaks up the fizz, the bass booms,
+// glass reflections). Outside: like a street video (ground reflection, buildings, open air).
+// Each gets a short room echo made on the fly (no recordings).
+var VIEWS = {
+  cabin: { shelfF: 150, shelfG: 4, boomF: 58, boomQ: 1.1, boomG: 4, lp1: 2800, lp1Q: .55, lp2: 6000, lp2Q: .7, wet: .3,
+    ir: { len: .2, tau: .035, lp: .35, early: [[.0011, .32], [.0027, -.24], [.0043, .17], [.0068, -.12]] } },
+  outside: { shelfF: 150, shelfG: 1, boomF: 58, boomQ: 1, boomG: 0, lp1: 9000, lp1Q: .6, lp2: 15000, lp2Q: .7, wet: .18,
+    ir: { len: 1.3, tau: .28, lp: .5, early: [[.0035, .45], [.019, .2], [.034, -.15], [.057, .1]] } }
+};
+// Room echo: decaying filtered noise (energy 1 per channel) plus a few early reflections (sized so
+// that after the wet gain they land at the given level next to the dry sound).
+function makeIR(sr, v) {
+  var c = v.ir, n = Math.round(c.len * sr), L = new Float32Array(n), R = new Float32Array(n), s = 0x6d2b79f5, lpL = 0, lpR = 0, eL = 0, eR = 0, i;
+  function rnd() { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296 * 2 - 1; }
+  for (i = 0; i < n; i++) {
+    var t = i / sr, env = Math.exp(-t / c.tau) * Math.min(1, t / .004);
+    lpL += (rnd() - lpL) * c.lp; lpR += (rnd() - lpR) * c.lp;
+    L[i] = lpL * env; R[i] = lpR * env; eL += L[i] * L[i]; eR += R[i] * R[i];
+  }
+  var gL = 1 / Math.sqrt(eL || 1), gR = 1 / Math.sqrt(eR || 1);
+  for (i = 0; i < n; i++) { L[i] *= gL; R[i] *= gR; }
+  c.early.forEach(function (p, j) { var k = Math.round(p[0] * sr), a = p[1] / v.wet; if (k + 1 < n) { L[k + (j % 2)] += a; R[k + 1 - (j % 2)] += a * .9; } });
+  return [L, R];
+}
+// ==/VIEW==
 
 (function () {
   'use strict';
@@ -413,14 +453,14 @@ var CARS = (function () {
   function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) {} }
   var saved = load();
   if (saved.engine && !saved.car) saved.car = { v8: 'c63', v12: 'f812', flat6: 'gt3' }[saved.engine];   // old version
-  var cfg = Object.assign({ car: 'c63', source: 'gps', lead: 0.8, motion: '0', volume: 0.7, intensity: 0.6, crackle: '1', lights: 'wild', units: 'kmh' }, saved);
+  var cfg = Object.assign({ car: 'c63', source: 'gps', lead: 0.8, motion: '0', volume: 0.7, intensity: 0.6, crackle: '1', lights: 'wild', units: 'kmh', view: 'cabin' }, saved);
   delete cfg.engine;
   if (!CARS[cfg.car]) cfg.car = 'c63';
   function car() { return CARS[cfg.car]; }
   function popsLevel() { return cfg.crackle === '2' ? 2.2 : cfg.crackle === '1' ? 1 : 0; }
 
   // ---------- audio ----------
-  var ctx = null, master = null, eng = null, workletReady = false, audioMode = '';
+  var ctx = null, master = null, eng = null, workletReady = false, audioMode = '', fx = null;
   function workletSource() {
     return EngineDSP.toString() + '\n' +
       'class TTEngine extends AudioWorkletProcessor {\n' +
@@ -438,6 +478,12 @@ var CARS = (function () {
       var lim = ctx.createDynamicsCompressor(); // safety limiter
       lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 10; lim.attack.value = .002; lim.release.value = .12;
       master.connect(lim); lim.connect(ctx.destination);
+      // listening position: EQ, then dry + room echo
+      fx = { shelf: ctx.createBiquadFilter(), boom: ctx.createBiquadFilter(), lp1: ctx.createBiquadFilter(), lp2: ctx.createBiquadFilter(), dry: ctx.createGain(), wet: ctx.createGain(), conv: ctx.createConvolver() };
+      fx.shelf.type = 'lowshelf'; fx.boom.type = 'peaking'; fx.lp1.type = 'lowpass'; fx.lp2.type = 'lowpass'; fx.conv.normalize = false;
+      fx.shelf.connect(fx.boom); fx.boom.connect(fx.lp1); fx.lp1.connect(fx.lp2);
+      fx.lp2.connect(fx.dry); fx.dry.connect(master); fx.lp2.connect(fx.conv); fx.conv.connect(fx.wet); fx.wet.connect(master);
+      applyView();
     }
     try {
       if (!ctx.audioWorklet || !window.AudioWorkletNode) throw new Error('no worklet');
@@ -446,12 +492,12 @@ var CARS = (function () {
         await ctx.audioWorklet.addModule(url); workletReady = true;
       }
       var node = new AudioWorkletNode(ctx, 'tt-engine', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-      node.connect(master);
+      node.connect(fx.shelf);
       eng = { node: node, post: function (m) { node.port.postMessage(m); } }; audioMode = 'worklet';
     } catch (err) {   // older browsers: same engine on the main thread
       var dsp = new EngineDSP(ctx.sampleRate), sp = ctx.createScriptProcessor(1024, 1, 2);
       sp.onaudioprocess = function (ev) { var o = ev.outputBuffer; dsp.process(o.getChannelData(0), o.getChannelData(1), o.length); };
-      sp.connect(master);
+      sp.connect(fx.shelf);
       eng = { node: sp, post: function (m) { dsp.msg(m); } }; audioMode = 'script';
     }
     window.__ttAudio = audioMode;
@@ -460,6 +506,17 @@ var CARS = (function () {
     var C = car();
     eng.post({ t: 'engine', e: Object.assign({}, C.dsp, { redline: C.redline, idle: C.idle }) });
     sendMix();
+  }
+  function applyView() {
+    if (!fx) return;
+    var v = VIEWS[cfg.view] || VIEWS.cabin, t = ctx.currentTime, q = function (x) { return 20 * Math.log10(x); }; // Web Audio lowpass Q is in dB
+    fx.shelf.frequency.setValueAtTime(v.shelfF, t); fx.shelf.gain.setValueAtTime(v.shelfG, t);
+    fx.boom.frequency.setValueAtTime(v.boomF, t); fx.boom.Q.setValueAtTime(v.boomQ, t); fx.boom.gain.setValueAtTime(v.boomG, t);
+    fx.lp1.frequency.setValueAtTime(v.lp1, t); fx.lp1.Q.setValueAtTime(q(v.lp1Q), t);
+    fx.lp2.frequency.setValueAtTime(v.lp2, t); fx.lp2.Q.setValueAtTime(q(v.lp2Q), t);
+    fx.dry.gain.setValueAtTime(1, t); fx.wet.gain.setValueAtTime(v.wet, t);
+    var ir = makeIR(ctx.sampleRate, v), buf = ctx.createBuffer(2, ir[0].length, ctx.sampleRate);
+    buf.getChannelData(0).set(ir[0]); buf.getChannelData(1).set(ir[1]); fx.conv.buffer = buf;
   }
   function sendMix() { if (eng) eng.post({ t: 'mix', pops: popsLevel(), intensity: cfg.intensity }); }
 
@@ -677,6 +734,7 @@ var CARS = (function () {
       if (k === 'source' && cfg.source === 'gps' && eng) startGps();
       if (k === 'source') test.v = 0;
       if (k === 'crackle') sendMix();
+      if (k === 'view') applyView();
     });
   });
   document.querySelectorAll('input[type=range]').forEach(function (r) {
