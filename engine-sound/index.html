@@ -233,6 +233,7 @@ class EngineDSP {
     this.bL = e.body.map(function (p) { var o = self.bq(); self.coef(o, 2, p[0], p[1], p[2]); return o; });
     this.bR = e.body.map(function (p) { var o = self.bq(); self.coef(o, 2, p[0], p[1], p[2]); return o; });
     this.intBp = this.bq(); this.whBp = this.bq(); this.coef(this.whBp, 1, 2600, 1.1); this.flBp = this.bq(); this.coef(this.flBp, 1, 1100, 1.4);
+    this.lpA = [this.bq(), this.bq(), this.bq(), this.bq()]; for (i = 0; i < 4; i++) this.coef(this.lpA[i], 0, e.outLp || 4500, .6);
     this.hpL = this.bq(); this.hpR = this.bq(); this.coef(this.hpL, 3, 24, .7); this.coef(this.hpR, 3, 24, .7);
     this.kR = 1 - Math.exp(-1 / (.008 * sr)); this.kL = 1 - Math.exp(-1 / (.025 * sr));
     this.liftK = Math.exp(-64 / (1.4 * sr)); this.bUp = 1 - Math.exp(-64 / (.5 * sr)); this.bDn = 1 - Math.exp(-64 / (.2 * sr)); this.flK = Math.exp(-1 / (.45 * sr));
@@ -264,7 +265,7 @@ class EngineDSP {
         var rate = e.popRate * this.popsLvl * ((1.5 + 40 * this.lift) * revs + (cut && this.cut <= 0 ? 14 : 0));
         if (this.r() < rate / perSec) this.pop(this.bank[k], .35 + .65 * Math.min(1, this.lift + .2));
       }
-    } else a = (.24 + .76 * load) * (1 + e.jitter * (this.r() * 2 - 1) * Math.max(.3, 1.4 - 1.4 * rn));
+    } else a = (.24 + .76 * load) * (1 + e.jitter * .4 * (this.r() * 2 - 1) * Math.max(.3, 1.4 - 1.4 * rn));
     this.amp[k] = a * this.gainC[k];
     // no two combustions are alike: each one a touch late or early, and a bit longer or shorter
     this.tj[k] = this.r() * e.tJit * (1.2 - .8 * rn);   // less at high revs: smearing the pulses there turns into hiss
@@ -300,18 +301,18 @@ class EngineDSP {
       var rpm = this.rpm, load = this.load, lim = 0;
       if (rpm > redl - 60 && this.loadT > .3 && !this.starter) {           // rev limiter: bounce off it
         this.limPh += e.limHz / sr; if (this.limPh >= 1) this.limPh -= 1;
-        lim = this.limPh < .42 ? 1 : 0; rpm -= 300 * this.limPh;
+        lim = this.limPh < .5 ? 1 : 0; rpm -= 450 * this.limPh;
       }
       var rn = rpm / redl;
       if ((this.cnt++ & 63) === 0) this.ctrl(rn, load);
       this.ph += rpm * this.wobM / 120 / sr; if (this.ph >= 1) this.ph -= 1;
-      var cutNow = lim || this.starter || this.cut > 0;
+      var cutNow = this.starter || this.cut > 0, limOn = lim;
       if (this.cut > 0) { if (this.cut === this.popAt && this.popPow > 0) this.pop((this.r() * nb) | 0, this.popPow); this.cut--; }
       for (b = 0; b < nb; b++) bin[b] = 0;
       var sum = 0, w = this.wEff, ph = this.ph;
       for (k = 0; k < n; k++) {
         var d = ph - off[k]; if (d < 0) d += 1;
-        if (d < prev[k]) this.fire(k, cutNow, rn, load);
+        if (d < prev[k]) this.fire(k, cutNow || (limOn && this.r() < .7), rn, load);
         prev[k] = d;
         var dd = d - tj[k];
         if (dd >= 0) { var wk = w * wf[k]; if (dd < wk) { var v = shape[(dd / wk * 1024) | 0] * amp[k]; bin[bank[k]] += v; sum += v; } }
@@ -321,7 +322,7 @@ class EngineDSP {
       for (b = 0; b < nb; b++) {
         var S = B[b], x = bin[b] * pre, nb2 = this.r() * 2 - 1;
         S.n1 += (nb2 - S.n1) * .2; S.n2 += (S.n1 - S.n2) * .025;             // gas turbulence: band-limited noise, not fizz
-        x += x * (S.n1 - S.n2) * this.rasp * .25;
+        
         if (e.turbo) { S.ts += (x - S.ts) * this.tsK; x = S.ts; }
         var ho = S.hb[S.hi]; S.hz += (ho - S.hz) * e.loopLp; var h = x + e.reflH * S.hz; S.hb[S.hi] = h; if (++S.hi === S.hb.length) S.hi = 0;   // headers
         var po = S.pb[S.pi]; S.pz += (po - S.pz) * e.loopLp; var p = h + e.refl * S.pz; S.pb[S.pi] = p; if (++S.pi === S.pb.length) S.pi = 0;   // pipes
@@ -339,18 +340,19 @@ class EngineDSP {
       var c = this.f(this.intBp, sum * pre) * this.intG;   // intake howl: from the firing pulses, no noise  // intake howl
       if (e.turbo) {
         var bo = this.boost; this.wPh += (1400 + 5200 * bo) / sr; if (this.wPh >= 1) this.wPh -= 1;
-        c += Math.sin(TAU * this.wPh) * .008 * bo * bo + this.f(this.whBp, this.rl * 6) * .02 * bo * (.3 + load);
+        c += Math.sin(TAU * this.wPh) * .008 * bo * bo;
         if (this.flut > .003) { this.flut *= this.flK; this.flPh += (13 + 12 * this.flut) / sr; var fm = .5 + .5 * Math.sin(TAU * this.flPh); c += this.f(this.flBp, nz) * this.flut * fm * fm * fm * .6; }
       }
       if (this.starter) { this.stPh += 1050 / sr; if (this.stPh >= 1) this.stPh -= 1; c += (Math.sin(TAU * this.stPh) + .4 * Math.sin(2 * TAU * this.stPh)) * .05 * (.65 + .35 * Math.sin(TAU * ph * n)); }
                                                        // valvetrain
-      this.rl += (nz - this.rl) * .006; c += this.rl * e.rumble * 2.2 * (.3 + .7 * load) * Math.min(1, rn * 3);   // deep body rumble
+      c += Math.sin(TAU * ph * n * .5) * e.rumble * .5 * (.3 + .7 * load) * Math.min(1, rn * 3);   // deep body rumble: a tone, not noise   // deep body rumble
       oL += c; oR += c;
       var mono = (oL + oR) * .5; oL += (mono - oL) * e.cross; oR += (mono - oR) * e.cross;
       for (var j = 0; j < this.bL.length; j++) { oL = this.f(this.bL[j], oL); oR = this.f(this.bR[j], oR); }
       var g = this.drive, out = e.gain * .5;
-      L[i] = this.f(this.hpL, this.sat(oL * g) * out);
-      R[i] = this.f(this.hpR, this.sat(oR * g) * out);
+      var yL = this.f(this.lpA[1], this.f(this.lpA[0], this.sat(oL * g) * out)), yR = this.f(this.lpA[3], this.f(this.lpA[2], this.sat(oR * g) * out));
+      L[i] = this.f(this.hpL, yL);
+      R[i] = this.f(this.hpR, yR);
     }
   }
 }
@@ -373,7 +375,7 @@ var CARS = (function () {
       dsp: { fire: even(8), bank: [0, 1, 0, 0, 1, 0, 1, 1], pan: [.42, -.42], cross: .2, header: [.62, .56], pipe: [3.3, 3.15],
         reflH: -.22, refl: -.38, loopLp: .32, pulseW: .15, pulseMs: 6.5, jitter: .14, cylVar: .1, offJit: .03, tJit: 0.003, wander: .006, rumble: .22,
         lpMin: 700, lpMax: 4400, body: [[95, 1.1, 6], [300, 1.6, 3], [1300, 1.4, -2], [2700, 2, 1]],
-        rasp: .18, drive: 1.4, intake: .22, intakeF: 380, mech: .006, turbo: 0, popRate: .55, popGain: .6, limHz: 11, pre: .2, gain: 1 }
+        rasp: .18, drive: 1.4, intake: .22, intakeF: 380, mech: .006, turbo: 0, popRate: .55, popGain: .6, outLp: 3600, limHz: 9, pre: .2, gain: 1 }
     },
     svj: {
       name: 'Aventador SVJ', sub: '6.5 V12 · NA · 8,700 rpm', badge: 'V12 6.5', color: '#c6ff00',
@@ -383,7 +385,7 @@ var CARS = (function () {
       dsp: { fire: even(12), bank: alt(12), pan: [.22, -.22], cross: .25, header: [.45, .47], pipe: [1.6, 1.66],
         reflH: -.22, refl: -.32, loopLp: .42, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .06, offJit: .015, tJit: 0.0015, wander: .004, rumble: .14,
         lpMin: 1600, lpMax: 9000, body: [[180, 1, 3], [650, 1.2, 4], [1500, 1.3, 3], [3300, 1.8, 2]],
-        rasp: .22, drive: 1.3, intake: .35, intakeF: 520, mech: .01, turbo: 0, popRate: .45, popGain: .72, limHz: 14, pre: .15, gain: 1.28 }
+        rasp: .22, drive: 1.3, intake: .35, intakeF: 520, mech: .01, turbo: 0, popRate: .45, popGain: .72, outLp: 4800, limHz: 9, pre: .15, gain: 1.28 }
     },
     f812: {
       name: '812 Superfast', sub: '6.5 V12 · NA · 8,900 rpm', badge: 'V12 6.5', color: '#ffd400',
@@ -392,7 +394,7 @@ var CARS = (function () {
       dsp: { fire: v12at(65), bank: alt(12), pan: [.35, -.35], cross: .2, header: [.4, .4], pipe: [2.1, 2.15],
         reflH: -.2, refl: -.3, loopLp: .5, pulseW: .1, pulseMs: 3.5, jitter: .035, cylVar: .04, offJit: .006, tJit: 0.00125, wander: .003, rumble: .1,
         lpMin: 2000, lpMax: 11000, body: [[260, 1, 2], [1100, 1.2, 3], [2400, 1.5, 4], [4200, 2.2, 3]],
-        rasp: .1, drive: .9, intake: .55, intakeF: 700, mech: .01, turbo: 0, popRate: .15, popGain: .45, limHz: 16, pre: .14, gain: 1.95 }
+        rasp: .1, drive: .9, intake: .55, intakeF: 700, mech: .01, turbo: 0, popRate: .15, popGain: .45, outLp: 5000, limHz: 9, pre: .14, gain: 1.95 }
     },
     m4: {
       name: 'M4 Competition', sub: '3.0 I6 twin-turbo · 7,200 rpm', badge: 'I6 TWIN TURBO', color: '#2fa4e7',
@@ -402,7 +404,7 @@ var CARS = (function () {
       dsp: { fire: even(6), bank: alt(6), pan: [.15, -.15], cross: .3, header: [.55, .6], pipe: [2.7, 2.75],
         reflH: -.22, refl: -.36, loopLp: .34, pulseW: .14, pulseMs: 5, jitter: .06, cylVar: .07, offJit: .02, tJit: 0.002, wander: .005, rumble: .16,
         lpMin: 900, lpMax: 5200, body: [[140, 1, 4], [520, 1.4, 3], [1900, 1.6, 2], [3400, 2, 1]],
-        rasp: .2, drive: 1.3, intake: .2, intakeF: 450, mech: .008, turbo: 1, popRate: .6, popGain: .55, limHz: 12, pre: .2, gain: 1.15 }
+        rasp: .2, drive: 1.3, intake: .2, intakeF: 450, mech: .008, turbo: 1, popRate: .6, popGain: .55, outLp: 4000, limHz: 9, pre: .2, gain: 1.15 }
     },
     gt3: {
       name: 'GT3 Flat-6', sub: '4.0 boxer 6 · NA · 9,000 rpm', badge: 'FLAT-6 4.0', color: '#ff8a1f',
@@ -411,7 +413,7 @@ var CARS = (function () {
       dsp: { fire: even(6), bank: alt(6), pan: [.35, -.35], cross: .2, header: [.35, .35], pipe: [1.9, 1.95],
         reflH: -.22, refl: -.3, loopLp: .46, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .05, offJit: .01, tJit: 0.0015, wander: .004, rumble: .12,
         lpMin: 1800, lpMax: 10000, body: [[220, 1, 2], [900, 1.3, 2], [1800, 1.5, 4], [3800, 2, 2]],
-        rasp: .15, drive: 1.1, intake: .45, intakeF: 620, mech: .015, turbo: 0, popRate: .2, popGain: .45, limHz: 15, pre: .16, gain: 2.05 }
+        rasp: .15, drive: 1.1, intake: .45, intakeF: 620, mech: .015, turbo: 0, popRate: .2, popGain: .45, outLp: 4800, limHz: 9, pre: .16, gain: 2.05 }
     }
   };
 })();
@@ -570,7 +572,7 @@ function makeIR(sr, v) {
 
   // ---------- engine + gearbox simulation ----------
   var test = { v: 0, pedal: 0 }, revHeld = 0;
-  var sim = { state: 'off', stT: 0, runAt: 0, rpm: 0, gear: 0, thr: 0, up: 0, neutral: true, lastShift: -1e9, shiftUp: false, hiAt: -1e9, blipUntil: 0, cutUntil: 0, lastT: 0, kmh: 0, boost: 0 };
+  var sim = { state: 'off', stT: 0, runAt: 0, rpm: 0, gear: 0, thr: 0, up: 0, neutral: true, lastShift: -1e9, vg: 0, shiftUp: false, hiAt: -1e9, blipUntil: 0, cutUntil: 0, lastT: 0, kmh: 0, boost: 0 };
   function rpmFor(v, gear) { var C = car(); return v / C.tyre * 60 * C.ratios[gear] * C.final; }
   function post(m) { if (eng) eng.post(m); }
   function step() {
@@ -609,14 +611,15 @@ function makeIR(sr, v) {
     } else {
       sim.neutral = false;
       var top = C.ratios.length - 1;
-      sim.up = C.idle * 2.6 + sim.thr * (C.redline * .97 - C.idle * 2.6);
-      var gr = rpmFor(v, sim.gear);
+      sim.up = C.idle * 3.4 + sim.thr * (C.redline * .97 - C.idle * 3.4);
+      sim.vg += (v - sim.vg) * Math.min(1, dt / .9);   // the gearbox decides on a smoothed speed (GPS jitter must not make it hunt)
+      var gr = rpmFor(sim.thr > .5 ? v : sim.vg, sim.gear);   // flat out: no lag
       if (sim.thr > .5) sim.hiAt = now;
       // after a hard pull it holds the gear for a moment when you lift (that's when it crackles), then shifts up
-      if (sim.gear < top && gr > sim.up && now - sim.lastShift > 380 && (sim.thr > .3 || now - sim.hiAt > 1300 || gr > C.redline * .9)) {
+      if (sim.gear < top && gr > sim.up && now - sim.lastShift > (sim.thr > .5 ? 380 : 2200) && (sim.thr > .3 || now - sim.hiAt > 1300 || gr > C.redline * .9)) {
         sim.gear++; sim.lastShift = now; sim.shiftUp = true; sim.cutUntil = now + C.shiftMs;
         post({ t: 'shift', ms: C.shiftMs * (.5 + .5 * sim.thr), pop: C.shiftPop * sim.thr });
-      } else if (sim.gear > 0 && gr < C.idle * 1.7 && now - sim.lastShift > 450) {
+      } else if (sim.gear > 0 && gr < C.idle * 1.6 && now - sim.lastShift > (sim.thr > .7 ? 450 : 2200)) {
         sim.gear--; sim.lastShift = now; sim.shiftUp = false; sim.blipUntil = now + 170;
       }
       gr = rpmFor(v, sim.gear);
@@ -753,7 +756,7 @@ function makeIR(sr, v) {
     if (!navigator.geolocation) { $('status').innerHTML = '<span class="warn">This browser has no GPS access.</span>'; return; }
     gps.watch = navigator.geolocation.watchPosition(onPos, function (err) { $('status').innerHTML = '<span class="warn">GPS: ' + (err.code === 1 ? 'location blocked - allow it in the browser settings' : err.message) + '</span>'; }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   }
-  function crank() { sim.state = 'crank'; sim.stT = performance.now(); sim.gear = 0; sim.lastShift = -1e9; }
+  function crank() { sim.vg = 0; sim.state = 'crank'; sim.stT = performance.now(); sim.gear = 0; sim.lastShift = -1e9; }
   var loop = null, statusLoop = null, wake = null, busy = false;
   async function start() {
     busy = true;
