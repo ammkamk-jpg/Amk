@@ -267,7 +267,7 @@ class EngineDSP {
     } else a = (.24 + .76 * load) * (1 + e.jitter * (this.r() * 2 - 1) * Math.max(.3, 1.4 - 1.4 * rn));
     this.amp[k] = a * this.gainC[k];
     // no two combustions are alike: each one a touch late or early, and a bit longer or shorter
-    this.tj[k] = this.r() * e.tJit * (1.4 - .6 * rn);
+    this.tj[k] = this.r() * e.tJit * (1.2 - .8 * rn);   // less at high revs: smearing the pulses there turns into hiss
     this.wf[k] = 1 + (this.r() - .5) * .3;
   }
   ctrl(rn, load) {
@@ -321,7 +321,7 @@ class EngineDSP {
       for (b = 0; b < nb; b++) {
         var S = B[b], x = bin[b] * pre, nb2 = this.r() * 2 - 1;
         S.n1 += (nb2 - S.n1) * .2; S.n2 += (S.n1 - S.n2) * .025;             // gas turbulence: band-limited noise, not fizz
-        x += x * (S.n1 - S.n2) * this.rasp * 4;
+        x += x * (S.n1 - S.n2) * this.rasp * .25;
         if (e.turbo) { S.ts += (x - S.ts) * this.tsK; x = S.ts; }
         var ho = S.hb[S.hi]; S.hz += (ho - S.hz) * e.loopLp; var h = x + e.reflH * S.hz; S.hb[S.hi] = h; if (++S.hi === S.hb.length) S.hi = 0;   // headers
         var po = S.pb[S.pi]; S.pz += (po - S.pz) * e.loopLp; var p = h + e.refl * S.pz; S.pb[S.pi] = p; if (++S.pi === S.pb.length) S.pi = 0;   // pipes
@@ -336,15 +336,15 @@ class EngineDSP {
         oL += pv * B[P.b].gl; oR += pv * B[P.b].gr;
         if (P.e2 < .002) this.pops.splice(q, 1);
       }
-      var c = this.f(this.intBp, sum * pre * (.55 + .9 * nz)) * this.intG;  // intake howl
+      var c = this.f(this.intBp, sum * pre) * this.intG;   // intake howl: from the firing pulses, no noise  // intake howl
       if (e.turbo) {
         var bo = this.boost; this.wPh += (1400 + 5200 * bo) / sr; if (this.wPh >= 1) this.wPh -= 1;
-        c += Math.sin(TAU * this.wPh) * .008 * bo * bo + this.f(this.whBp, nz) * .04 * bo * (.3 + load);
+        c += Math.sin(TAU * this.wPh) * .008 * bo * bo + this.f(this.whBp, this.rl * 6) * .02 * bo * (.3 + load);
         if (this.flut > .003) { this.flut *= this.flK; this.flPh += (13 + 12 * this.flut) / sr; var fm = .5 + .5 * Math.sin(TAU * this.flPh); c += this.f(this.flBp, nz) * this.flut * fm * fm * fm * .6; }
       }
       if (this.starter) { this.stPh += 1050 / sr; if (this.stPh >= 1) this.stPh -= 1; c += (Math.sin(TAU * this.stPh) + .4 * Math.sin(2 * TAU * this.stPh)) * .05 * (.65 + .35 * Math.sin(TAU * ph * n)); }
-      c += nzh * e.mech * rn;                                                 // valvetrain
-      this.rl += (nz - this.rl) * .03; c += this.rl * e.rumble * (.3 + .7 * load) * Math.min(1, rn * 3);   // deep body rumble
+                                                       // valvetrain
+      this.rl += (nz - this.rl) * .006; c += this.rl * e.rumble * 2.2 * (.3 + .7 * load) * Math.min(1, rn * 3);   // deep body rumble
       oL += c; oR += c;
       var mono = (oL + oR) * .5; oL += (mono - oL) * e.cross; oR += (mono - oR) * e.cross;
       for (var j = 0; j < this.bL.length; j++) { oL = this.f(this.bL[j], oL); oR = this.f(this.bR[j], oR); }
@@ -371,7 +371,7 @@ var CARS = (function () {
       accel: 7.2, vmax: 78, revUp: 6500, revDown: 3600, shiftMs: 95, shiftPop: .9, blip: .75, launch: 3400, flare: 1.95, crank: 750,
       // cross-plane V8, firing order 1-5-4-2-6-3-7-8 (1-4 right bank, 5-8 left): each bank fires unevenly = the burble
       dsp: { fire: even(8), bank: [0, 1, 0, 0, 1, 0, 1, 1], pan: [.42, -.42], cross: .2, header: [.62, .56], pipe: [3.3, 3.15],
-        reflH: -.22, refl: -.38, loopLp: .32, pulseW: .15, pulseMs: 6.5, jitter: .14, cylVar: .1, offJit: .03, tJit: .006, wander: .006, rumble: .22,
+        reflH: -.22, refl: -.38, loopLp: .32, pulseW: .15, pulseMs: 6.5, jitter: .14, cylVar: .1, offJit: .03, tJit: 0.003, wander: .006, rumble: .22,
         lpMin: 700, lpMax: 4400, body: [[95, 1.1, 6], [300, 1.6, 3], [1300, 1.4, -2], [2700, 2, 1]],
         rasp: .18, drive: 1.4, intake: .22, intakeF: 380, mech: .006, turbo: 0, popRate: .55, popGain: .6, limHz: 11, pre: .2, gain: 1 }
     },
@@ -381,7 +381,7 @@ var CARS = (function () {
       accel: 9.8, vmax: 97, revUp: 9500, revDown: 4800, shiftMs: 140, shiftPop: 1.2, blip: .9, launch: 4200, flare: 2.1, crank: 650,
       // 60-degree V12: perfectly even, the banks take turns. Single-clutch ISR box: brutal shifts.
       dsp: { fire: even(12), bank: alt(12), pan: [.22, -.22], cross: .25, header: [.45, .47], pipe: [1.6, 1.66],
-        reflH: -.22, refl: -.32, loopLp: .42, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .06, offJit: .015, tJit: .003, wander: .004, rumble: .14,
+        reflH: -.22, refl: -.32, loopLp: .42, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .06, offJit: .015, tJit: 0.0015, wander: .004, rumble: .14,
         lpMin: 1600, lpMax: 9000, body: [[180, 1, 3], [650, 1.2, 4], [1500, 1.3, 3], [3300, 1.8, 2]],
         rasp: .22, drive: 1.3, intake: .35, intakeF: 520, mech: .01, turbo: 0, popRate: .45, popGain: .72, limHz: 14, pre: .15, gain: 1.28 }
     },
@@ -390,7 +390,7 @@ var CARS = (function () {
       idle: 1000, redline: 8900, maxDial: 10000, ratios: [3.08, 2.19, 1.63, 1.29, 1.03, 0.84, 0.63], final: 4.44, tyre: 2.29,
       accel: 9.6, vmax: 94, revUp: 11000, revDown: 5400, shiftMs: 45, shiftPop: .35, blip: .8, launch: 3800, flare: 1.75, crank: 600,
       dsp: { fire: v12at(65), bank: alt(12), pan: [.35, -.35], cross: .2, header: [.4, .4], pipe: [2.1, 2.15],
-        reflH: -.2, refl: -.3, loopLp: .5, pulseW: .1, pulseMs: 3.5, jitter: .035, cylVar: .04, offJit: .006, tJit: .0025, wander: .003, rumble: .1,
+        reflH: -.2, refl: -.3, loopLp: .5, pulseW: .1, pulseMs: 3.5, jitter: .035, cylVar: .04, offJit: .006, tJit: 0.00125, wander: .003, rumble: .1,
         lpMin: 2000, lpMax: 11000, body: [[260, 1, 2], [1100, 1.2, 3], [2400, 1.5, 4], [4200, 2.2, 3]],
         rasp: .1, drive: .9, intake: .55, intakeF: 700, mech: .01, turbo: 0, popRate: .15, popGain: .45, limHz: 16, pre: .14, gain: 1.95 }
     },
@@ -400,7 +400,7 @@ var CARS = (function () {
       accel: 7.6, vmax: 81, revUp: 7000, revDown: 4200, shiftMs: 70, shiftPop: .8, blip: .7, launch: 3000, flare: 1.6, crank: 700,
       // inline-6, firing order 1-5-3-6-2-4; cylinders 1-3 and 4-6 each feed one turbo
       dsp: { fire: even(6), bank: alt(6), pan: [.15, -.15], cross: .3, header: [.55, .6], pipe: [2.7, 2.75],
-        reflH: -.22, refl: -.36, loopLp: .34, pulseW: .14, pulseMs: 5, jitter: .06, cylVar: .07, offJit: .02, tJit: .004, wander: .005, rumble: .16,
+        reflH: -.22, refl: -.36, loopLp: .34, pulseW: .14, pulseMs: 5, jitter: .06, cylVar: .07, offJit: .02, tJit: 0.002, wander: .005, rumble: .16,
         lpMin: 900, lpMax: 5200, body: [[140, 1, 4], [520, 1.4, 3], [1900, 1.6, 2], [3400, 2, 1]],
         rasp: .2, drive: 1.3, intake: .2, intakeF: 450, mech: .008, turbo: 1, popRate: .6, popGain: .55, limHz: 12, pre: .2, gain: 1.15 }
     },
@@ -409,7 +409,7 @@ var CARS = (function () {
       idle: 900, redline: 9000, maxDial: 10000, ratios: [3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84], final: 4.0, tyre: 2.12,
       accel: 8.6, vmax: 88, revUp: 10500, revDown: 6000, shiftMs: 40, shiftPop: .4, blip: .85, launch: 4500, flare: 1.6, crank: 600,
       dsp: { fire: even(6), bank: alt(6), pan: [.35, -.35], cross: .2, header: [.35, .35], pipe: [1.9, 1.95],
-        reflH: -.22, refl: -.3, loopLp: .46, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .05, offJit: .01, tJit: .003, wander: .004, rumble: .12,
+        reflH: -.22, refl: -.3, loopLp: .46, pulseW: .11, pulseMs: 4, jitter: .05, cylVar: .05, offJit: .01, tJit: 0.0015, wander: .004, rumble: .12,
         lpMin: 1800, lpMax: 10000, body: [[220, 1, 2], [900, 1.3, 2], [1800, 1.5, 4], [3800, 2, 2]],
         rasp: .15, drive: 1.1, intake: .45, intakeF: 620, mech: .015, turbo: 0, popRate: .2, popGain: .45, limHz: 15, pre: .16, gain: 2.05 }
     }
@@ -424,7 +424,7 @@ var CARS = (function () {
 var VIEWS = {
   cabin: { shelfF: 150, shelfG: 4, boomF: 58, boomQ: 1.1, boomG: 4, lp1: 2800, lp1Q: .55, lp2: 6000, lp2Q: .7, wet: .3,
     ir: { len: .2, tau: .035, lp: .35, early: [[.0011, .32], [.0027, -.24], [.0043, .17], [.0068, -.12]] } },
-  outside: { shelfF: 150, shelfG: 1, boomF: 58, boomQ: 1, boomG: 0, lp1: 9000, lp1Q: .6, lp2: 15000, lp2Q: .7, wet: .18,
+  outside: { shelfF: 150, shelfG: 1, boomF: 58, boomQ: 1, boomG: 0, lp1: 5500, lp1Q: .6, lp2: 9000, lp2Q: .7, wet: .18,
     ir: { len: 1.3, tau: .28, lp: .5, early: [[.0035, .45], [.019, .2], [.034, -.15], [.057, .1]] } }
 };
 // Room echo: decaying filtered noise (energy 1 per channel) plus a few early reflections (sized so
