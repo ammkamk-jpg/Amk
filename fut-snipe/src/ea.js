@@ -68,7 +68,8 @@
       });
     } catch (e) {}
   }
-  function searchLabel() { if (curName) return curName; var id = searchedDefId() || stats.curDefId; return id ? ('player #' + id) : 'player'; }
+  function searchLabel() { if (curName) return curName; var id = searchedDefId() || stats.curDefId; return id ? ('player #' + id) : 'any card'; }
+  function cardLabel(it) { return nameOf(it) || searchLabel(); } // a bought card's own name (matters when no player is searched)
   function sessionNet() { return (startCoins != null && coins() != null) ? coins() - startCoins : null; }
 
   // EA's allowed price range per card. Read from (a) the item itself, (b) the requestMarketData
@@ -144,7 +145,7 @@
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
-          if (items.length && !searchBase) { // name/id from a result of the searched card itself, not a special version of it
+          if (items.length && !searchBase && searchedDefId()) { // a specific player was searched (a rarity-only search stays "any card"): name/id from a result of the searched card itself, not a special version of it
             var base = searchedDefId(), own = items.filter(function (x) { return !base || String(defIdOf(x.it)) === String(base); })[0] || items[0];
             if (!curName) curName = nameOf(own.it); stats.curDefId = defIdOf(own.it) || stats.curDefId;
           }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      4.4.0
+// @version      4.4.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '4.4.0';
+  var VERSION = '4.4.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -383,7 +383,8 @@
       });
     } catch (e) {}
   }
-  function searchLabel() { if (curName) return curName; var id = searchedDefId() || stats.curDefId; return id ? ('player #' + id) : 'player'; }
+  function searchLabel() { if (curName) return curName; var id = searchedDefId() || stats.curDefId; return id ? ('player #' + id) : 'any card'; }
+  function cardLabel(it) { return nameOf(it) || searchLabel(); } // a bought card's own name (matters when no player is searched)
   function sessionNet() { return (startCoins != null && coins() != null) ? coins() - startCoins : null; }
 
   // EA's allowed price range per card. Read from (a) the item itself, (b) the requestMarketData
@@ -459,7 +460,7 @@
             items.push({ it: raw[i], p: p, secs: expiresOf(raw[i]) });
           }
           items.sort(function (a, b) { return a.p - b.p; });
-          if (items.length && !searchBase) { // name/id from a result of the searched card itself, not a special version of it
+          if (items.length && !searchBase && searchedDefId()) { // a specific player was searched (a rarity-only search stays "any card"): name/id from a result of the searched card itself, not a special version of it
             var base = searchedDefId(), own = items.filter(function (x) { return !base || String(defIdOf(x.it)) === String(base); })[0] || items[0];
             if (!curName) curName = nameOf(own.it); stats.curDefId = defIdOf(own.it) || stats.curDefId;
           }
@@ -616,10 +617,10 @@
   }
   async function afterBuy(item) {
     if (!keepMode()) return relist(item);
-    if (cfg.afterBuy === 2) { feed(searchLabel() + ' left in Unassigned', 'list'); return; }
+    if (cfg.afterBuy === 2) { feed(cardLabel(item) + ' left in Unassigned', 'list'); return; }
     await sleep(rand(1200, 3000)); // still moves if you tap Stop meanwhile
     var ok = await moveToTransfer(item);
-    feed(ok ? searchLabel() + ' moved to transfer list (not listed)' : 'Move to transfer list failed (full?) - card is in Unassigned', ok ? 'list' : 'stop');
+    feed(ok ? cardLabel(item) + ' moved to transfer list (not listed)' : 'Move to transfer list failed (full?) - card is in Unassigned', ok ? 'list' : 'stop');
   }
 
   // A special version caught by a player search: keep it on the transfer list unlisted, price-check
@@ -651,7 +652,7 @@
     if (!(await rangeOk(item, sell))) return requestStop('price range stop: list price ' + fmt(sell) + ' is outside EA\u2019s range');
     var ok = await listItem(item, Math.max(MIN_PRICE, sell - stepFor(sell)), sell, cfg.listDur || 3600);
     if (ok) noteList(item.id, sell);
-    feed(ok ? searchLabel() + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
+    feed(ok ? cardLabel(item) + ' listed for ' + fmt(sell) + ' · ' + durLabel(cfg.listDur) : 'Listing failed' + (moved ? '' : ' (move failed)') + ' - list it by hand', ok ? 'list' : 'stop');
     if (ok) await hubPass(true);
   }
 
@@ -673,9 +674,9 @@
       if (b.ok) {
         var it = r.items[j].it, special = !keep && cfg.keepSpecials && isSpecialBuy(defIdOf(it), capturedPlain || capturedFromUrl);
         var e = keep || special ? 0 : profitAt(listPrice(), price);
-        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, searchLabel(), false, ratingOf(r.items[j].it));
+        stats.buys++; bought++; addDaily(1); lastBuy = 'ok ' + price; noteBuy(r.items[j].it.id, price, cardLabel(r.items[j].it), false, ratingOf(r.items[j].it));
         stats.spent += price; stats.est += e; life.bought++; life.spent += price; life.est += e; saveLife();
-        feed(searchLabel() + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(searchLabel(), price, keep || special ? null : e); render();
+        feed(cardLabel(it) + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(cardLabel(it), price, keep || special ? null : e); render();
         if (special) await keepSpecial(it, price); else await afterBuy(it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
       if (stats.buys >= cfg.sessionBuyCap) return;
