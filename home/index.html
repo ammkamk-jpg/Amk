@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Haus">
+<title>Haus</title>
+<style>
+  :root { --bg:#0e1116; --card:#181c23; --line:#262c36; --txt:#f2f4f8; --mut:#8a93a3; --on:#ffb02e; --ok:#34d399; --bad:#fb7185; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt); font: 17px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent; }
+  main { max-width: 520px; margin: 0 auto; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); display: grid; gap: 14px; }
+  h1 { margin: 4px 2px 0; font-size: 26px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 16px; }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .head b { font-size: 19px; }
+  .pill { padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 700; background: #262c36; color: var(--mut); }
+  .pill.on { background: rgba(255,176,46,.18); color: var(--on); }
+  .big { font-size: 46px; font-weight: 800; margin: 10px 0 2px; font-variant-numeric: tabular-nums; }
+  .mut { color: var(--mut); font-size: 14px; }
+  .err { color: var(--bad); font-size: 14px; margin-top: 8px; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin-top: 12px; }
+  button { font: 700 17px inherit; font-family: inherit; color: var(--txt); background: #232933; border: 1px solid var(--line); border-radius: 14px; padding: 14px 8px; }
+  button.sel { background: var(--on); color: #1a1205; border-color: transparent; }
+  button:active { opacity: .7; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+  .row button { width: 56px; padding: 10px 0; font-size: 24px; }
+  .row .t { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 14px 0 4px; accent-color: var(--on); height: 28px; }
+  .cols { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .cols i { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--line); display: block; }
+  .cols input { width: 38px; height: 38px; border: 0; padding: 0; background: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Haus</h1>
+  <section class="card" id="heat" hidden></section>
+  <div id="lamps" style="display:grid;gap:14px"></div>
+  <div class="mut" id="msg" style="text-align:center"></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var busy = 0, last = null;
+  function api(path, body) {
+    return fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined)
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; }); });
+  }
+  function note(t) { $('msg').textContent = t || ''; }
+  function fmt(x) { return String(x).replace('.', ','); }
+  var COLORS = [['#ff4d4d', { r: 255, g: 40, b: 40 }], ['#ff9a2e', { r: 255, g: 140, b: 20 }], ['#ffe14d', { r: 255, g: 220, b: 40 }], ['#3ddc84', { r: 40, g: 220, b: 110 }], ['#3aa0ff', { r: 40, g: 120, b: 255 }], ['#b06cff', { r: 160, g: 90, b: 255 }]];
+
+  function drawHeat(h) {
+    var el = $('heat'); el.hidden = !h; if (!h) return;
+    var mode = h.mode;
+    el.innerHTML =
+      '<div class="head"><b>' + h.name + '</b><span class="pill ' + (h.on ? 'on' : '') + '">' + (h.reachable === false ? 'offline' : h.on ? 'heizt' : 'aus') + '</span></div>' +
+      (h.temp != null ? '<div class="big">' + fmt(h.temp.toFixed(1)) + ' °C</div><div class="mut">Raumtemperatur</div>' : '<div class="mut" style="margin-top:10px">Kein Temperaturfühler: nur Ein/Aus</div>') +
+      '<div class="seg"><button data-m="off" class="' + (mode === 'off' ? 'sel' : '') + '">Aus</button><button data-m="on" class="' + (mode === 'on' ? 'sel' : '') + '">Ein</button>' +
+      (h.canAuto ? '<button data-m="auto" class="' + (mode === 'auto' ? 'sel' : '') + '">Auto</button>' : '') + '</div>' +
+      (h.canAuto ? '<div class="row"><button data-t="-0.5">−</button><div style="text-align:center"><div class="t">' + fmt(h.target.toFixed(1)) + ' °C</div><div class="mut">Ziel</div></div><button data-t="0.5">+</button></div>' : '') +
+      (mode === 'on' && h.offAt ? '<div class="mut" style="margin-top:10px">Schaltet automatisch aus um ' + new Date(h.offAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + '</div>' : '') +
+      (h.error ? '<div class="err">' + h.error + '</div>' : '');
+    el.onclick = function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      var body = b.dataset.m ? { mode: b.dataset.m } : { target: Math.round((h.target + Number(b.dataset.t)) * 2) / 2 };
+      send('/api/heating', body);
+    };
+  }
+  function drawLamps(ls) {
+    var host = $('lamps');
+    if (host.children.length !== ls.length) host.innerHTML = '';
+    ls.forEach(function (l, i) {
+      var c = host.children[i];
+      if (!c) { c = document.createElement('section'); c.className = 'card'; c.dataset.i = i; host.appendChild(c); build(c, i); }
+      c.querySelector('b').textContent = l.name;
+      var pill = c.querySelector('.pill'); pill.textContent = l.reachable ? (l.on ? 'an' : 'aus') : 'offline'; pill.className = 'pill ' + (l.on ? 'on' : '');
+      c.querySelector('.err').textContent = l.reachable ? '' : (l.error || '');
+      c.querySelector('[data-k=toggle]').classList.toggle('sel', !!l.on);
+      c.querySelector('[data-k=toggle]').textContent = l.on ? 'Ausschalten' : 'Einschalten';
+      var r = c.querySelector('input[type=range]'); if (l.reachable && !r.dataset.drag && l.brightness != null) r.value = l.brightness;
+    });
+  }
+  function build(c, i) {
+    c.innerHTML = '<div class="head"><b></b><span class="pill"></span></div>' +
+      '<div class="seg"><button data-k="toggle">Einschalten</button></div>' +
+      '<input type="range" min="1" max="100" value="50"><div class="mut">Helligkeit</div>' +
+      '<div class="cols"><i data-w="2700" style="background:#ffb86b" title="warm"></i><i data-w="4500" style="background:#fff1de" title="neutral"></i>' +
+      COLORS.map(function (x, k) { return '<i data-c="' + k + '" style="background:' + x[0] + '"></i>'; }).join('') + '<input type="color" value="#ffffff"></div>' +
+      '<div class="err"></div>';
+    var r = c.querySelector('input[type=range]'), tmr = null;
+    r.addEventListener('input', function () { r.dataset.drag = 1; clearTimeout(tmr); tmr = setTimeout(function () { send('/api/lamp/' + i, { on: true, brightness: Number(r.value) }); }, 250); });
+    r.addEventListener('change', function () { setTimeout(function () { delete r.dataset.drag; }, 800); });
+    c.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-k],[data-w],[data-c]'); if (!t) return;
+      if (t.dataset.k) send('/api/lamp/' + i, { on: !(last && last.lamps[i] && last.lamps[i].on) });
+      else if (t.dataset.w) send('/api/lamp/' + i, { on: true, kelvin: Number(t.dataset.w) });
+      else send('/api/lamp/' + i, { on: true, color: COLORS[Number(t.dataset.c)][1] });
+    });
+    c.querySelector('input[type=color]').addEventListener('change', function (e) {
+      var v = e.target.value; send('/api/lamp/' + i, { on: true, color: { r: parseInt(v.slice(1, 3), 16), g: parseInt(v.slice(3, 5), 16), b: parseInt(v.slice(5, 7), 16) } });
+    });
+  }
+  function send(path, body) {
+    busy++; note('…');
+    api(path, body).then(function () { note(''); }).catch(function (e) { note('Fehler: ' + e.message); })
+      .then(function () { busy--; setTimeout(refresh, 300); });
+  }
+  function refresh() {
+    if (busy) return;
+    api('/api/state').then(function (s) { last = s; drawHeat(s.heating); drawLamps(s.lamps); if (!$('msg').textContent.startsWith('Fehler')) note(''); })
+      .catch(function () { note('Keine Verbindung zum Panel'); });
+  }
+  refresh(); setInterval(refresh, 5000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+})();
+</script>
+</body>
+</html>

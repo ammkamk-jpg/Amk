@@ -1,0 +1,16 @@
+{
+  "port": 8080,
+  "heating": {
+    "name": "Fußbodenheizung",
+    "host": "192.168.1.50",
+    "channel": 0,
+    "tempSensor": null,
+    "target": 21,
+    "hysteresis": 0.5,
+    "autoOffHours": 0
+  },
+  "lamps": [
+    { "name": "Wohnzimmer", "ip": "192.168.1.60" },
+    { "name": "Schlafzimmer", "ip": "192.168.1.61" }
+  ]
+}

@@ -1,2 +1,4 @@
 dist/
 node_modules/
+home/config.json
+home/state.json
