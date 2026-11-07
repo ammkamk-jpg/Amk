@@ -14,7 +14,7 @@
   html, body { margin: 0; background: var(--bg); color: var(--txt); font: 16px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent; }
   main { max-width: 520px; margin: 0 auto; padding: max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); display: grid; gap: 12px; }
   h1 { margin: 2px 0 0; font-size: 22px; font-weight: 900; background: linear-gradient(135deg, var(--a1), var(--a2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .cam { position: relative; aspect-ratio: 3 / 4; border-radius: 20px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+  .cam { position: relative; aspect-ratio: 3 / 4; max-height: 52vh; width: 100%; justify-self: center; border-radius: 20px; overflow: hidden; background: #000; border: 1px solid var(--line); }
   .cam video, .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .guide { position: absolute; left: 20%; right: 20%; top: 12%; bottom: 12%; border: 3px solid rgba(255,255,255,.9); border-radius: 18px; box-shadow: 0 0 0 999px rgba(0,0,0,.45); pointer-events: none; }
   .guide span { position: absolute; left: 0; right: 0; top: -30px; text-align: center; font-size: 13px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000; }
@@ -37,6 +37,10 @@
   .hist a { display: flex; justify-content: space-between; color: var(--txt); text-decoration: none; padding: 10px 12px; border-radius: 12px; background: #0c1018; border: 1px solid var(--line); font-weight: 700; }
   .hist a small { color: var(--mut); font-weight: 600; }
   .note { font-size: 12px; color: #6b7487; }
+  .live { position: absolute; left: 10px; top: 10px; padding: 4px 10px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; font: 800 12px inherit; font-family: inherit; }
+  .live i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 6px; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .btn.big { font-size: 18px; padding: 18px 12px; }
   #file { display: none; }
 </style>
 </head>
@@ -48,30 +52,30 @@
     <video id="video" playsinline muted autoplay></video>
     <img id="still" alt="" hidden>
     <div class="guide" id="guide"><span>Karte hier ins Feld</span></div>
-    <div class="hint" id="hint">Tippe auf „Kamera starten“.<br>Halte die Karte so, dass Name und Wertung im Rahmen sind.</div>
+    <div class="hint" id="hint">Tippe auf „Kamera starten“.<br>Dann die Karte einfach in den Rahmen halten: sie wird von selbst erkannt.</div>
+    <div class="live" id="live" hidden><i></i>LIVE</div>
   </div>
+
+  <div class="status" id="status"></div>
+
+  <section class="panel" id="result" hidden>
+    <div class="name"><input type="text" id="name" autocomplete="off" autocapitalize="words" aria-label="Spieler"><input type="text" class="rating" id="rating" inputmode="numeric" maxlength="2" placeholder="OVR" aria-label="Wertung"></div>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <a class="btn big" id="futbin" target="_blank" rel="noopener">FUTBIN</a>
+      <a class="btn big sec" id="futgg" target="_blank" rel="noopener">fut.gg</a>
+    </div>
+  </section>
 
   <div class="row">
     <button id="start">Kamera starten</button>
-    <button id="scan" disabled>Scannen</button>
+    <button class="sec" id="scan" disabled>Pause</button>
   </div>
   <div class="row">
     <button class="sec" id="pick">Foto wählen</button>
     <button class="sec" id="torch" hidden>Licht</button>
   </div>
   <input type="file" id="file" accept="image/*" capture="environment">
-
-  <div class="status" id="status"></div>
-
-  <section class="panel" id="result" hidden>
-    <label for="name">Erkannter Spieler (tippen zum Korrigieren)</label>
-    <div class="name"><input type="text" id="name" autocomplete="off" autocapitalize="words"><input type="text" class="rating" id="rating" inputmode="numeric" maxlength="2" placeholder="OVR"></div>
-    <div class="chips" id="chips"></div>
-    <div class="row">
-      <a class="btn" id="futbin" target="_blank" rel="noopener">Preis auf FUTBIN</a>
-      <a class="btn" id="futgg" target="_blank" rel="noopener">Preis auf fut.gg</a>
-    </div>
-  </section>
 
   <section class="panel" id="histBox" hidden>
     <label>Zuletzt gescannt</label>
@@ -86,7 +90,7 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var video = $('video'), stream = null, worker = null, busy = false;
+  var video = $('video'), stream = null, busy = false, OCR_W = 640;
 
   // ---------- Erkennung: Name und Wertung aus dem gelesenen Text ----------
   // Auf FUT-Karten stehen ausser dem Namen nur Kürzel (Werte, Positionen) und Zahlen.
@@ -115,7 +119,7 @@
 
   // ---------- Bild vorbereiten: Ausschnitt, Graustufen, Kontrast ----------
   function prep(src, sx, sy, sw, sh, invert) {
-    var scale = Math.min(3, 1000 / sw), c = document.createElement('canvas');
+    var scale = Math.min(2, OCR_W / sw), c = document.createElement('canvas');
     c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
     var g = c.getContext('2d', { willReadFrequently: true });
     g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
@@ -135,10 +139,24 @@
     return [x, y, Math.min(w, iw - x), Math.min(h, ih - y)];
   }
 
+  // Die Texterkennung wird beim Öffnen der Seite geladen, nicht erst beim ersten Scan.
+  var workerP = null;
+  function getWorker() {
+    if (!workerP) {
+      workerP = (async function () {
+        if (!window.Tesseract) throw new Error('Texterkennung nicht geladen (Internet?)');
+        var w = await Tesseract.createWorker('eng');
+        await w.setParameters({ tessedit_pageseg_mode: window.__psm || '11' }); // verstreuter Text: Karte, keine Buchseite
+        return w;
+      })();
+      workerP.catch(function () { workerP = null; });
+    }
+    return workerP;
+  }
   async function ocr(canvas) {
-    if (!window.Tesseract) throw new Error('Texterkennung nicht geladen (Internet?)');
-    if (!worker) { say('Texterkennung wird geladen… (nur beim ersten Mal)'); worker = await Tesseract.createWorker('eng'); }
+    var worker = await getWorker(), t0 = performance.now();
     var r = await worker.recognize(canvas);
+    window.__ocrMs = Math.round(performance.now() - t0);
     window.__lastText = r.data.text || '';
     return r.data.text || '';
   }
@@ -190,10 +208,38 @@
     $('hist').innerHTML = h.map(function (x) { return '<a target="_blank" rel="noopener" href="https://www.futbin.com/players?search=' + encodeURIComponent(x.n) + '">' + x.n.replace(/</g, '') + '<small>' + (x.r ? x.r + ' · ' : '') + 'FUTBIN</small></a>'; }).join('');
   }
 
+  // ---------- Live-Erkennung: liest laufend, zeigt einen Namen, sobald er zweimal kurz hintereinander kommt ----------
+  var live = { on: false, recent: [], shown: '', inv: false, misses: 0 };
+  async function liveTick() {
+    if (!stream || !live.on) return;
+    if (!busy && video.videoWidth && !document.hidden) {
+      busy = true;
+      try {
+        var c = guideCrop(video, video.videoWidth, video.videoHeight);
+        var hit = parse(await ocr(prep(video, c[0], c[1], c[2], c[3], live.inv)));
+        var top = hit.names[0];
+        if (!top) { if (++live.misses >= 2) { live.inv = !live.inv; live.misses = 0; } } // helle Schrift? Farben umdrehen
+        else {
+          live.misses = 0;
+          live.recent = live.recent.concat(top).slice(-3);
+          var count = live.recent.filter(function (n) { return n === top; }).length;
+          if (count >= 2 && top !== live.shown) {
+            live.shown = top; show(hit); remember(top, hit.rating); say('');
+            try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) {}
+          } else if (top === live.shown && hit.rating && !$('rating').value) { $('rating').value = hit.rating; links(); }
+        }
+      } catch (e) { say(String(e.message || e), true); }
+      busy = false;
+    }
+    setTimeout(liveTick, 120);
+  }
+  function setLive(on) { live.on = on; $('live').hidden = !on; $('scan').textContent = on ? 'Pause' : 'Weiter'; if (on) liveTick(); }
+
   // ---------- Kamera ----------
   function say(t, err) { $('status').textContent = t || ''; $('status').classList.toggle('err', !!err); }
-  $('start').addEventListener('click', async function () {
-    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; video.srcObject = null; $('start').textContent = 'Kamera starten'; $('scan').disabled = true; $('torch').hidden = true; $('hint').hidden = false; return; }
+  $('start').addEventListener('click', function () { if (stream) stopCam(); else startCam(); });
+  function stopCam() { setLive(false); stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; video.srcObject = null; $('start').textContent = 'Kamera starten'; $('scan').disabled = true; $('torch').hidden = true; $('hint').hidden = false; }
+  async function startCam() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { say('Dieser Browser gibt die Kamera nicht frei. Nimm „Foto wählen“.', true); return; }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
@@ -202,14 +248,12 @@
       $('start').textContent = 'Kamera aus'; $('scan').disabled = false; say('');
       var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {};
       $('torch').hidden = !caps.torch;
+      live.recent = []; live.shown = ''; setLive(true);
     } catch (e) { stream = null; say(e && e.name === 'NotAllowedError' ? 'Kamera nicht erlaubt. In den Einstellungen für diese Seite erlauben, oder „Foto wählen“.' : 'Kamera nicht verfügbar: ' + (e.message || e), true); }
-  });
+  }
   var torchOn = false;
   $('torch').addEventListener('click', function () { var tr = stream && stream.getVideoTracks()[0]; if (!tr) return; torchOn = !torchOn; tr.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function () {}); });
-  $('scan').addEventListener('click', function () {
-    if (!stream || !video.videoWidth) return;
-    read(video, guideCrop(video, video.videoWidth, video.videoHeight));
-  });
+  $('scan').addEventListener('click', function () { if (stream) setLive(!live.on); });
   $('pick').addEventListener('click', function () { $('file').click(); });
   $('file').addEventListener('change', function () {
     var f = this.files && this.files[0]; if (!f) return;
@@ -222,6 +266,9 @@
   });
   drawHist();
   window.__parse = parse; // für Tests
+  getWorker().catch(function () {}); // Texterkennung schon jetzt laden
+  // Kamera schon erlaubt? Dann gleich starten, ohne Tippen.
+  try { if (navigator.permissions && navigator.permissions.query) navigator.permissions.query({ name: 'camera' }).then(function (p) { if (p.state === 'granted' && !stream) startCam(); }).catch(function () {}); } catch (e) {}
 })();
 </script>
 </body>
