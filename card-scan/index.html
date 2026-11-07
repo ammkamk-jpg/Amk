@@ -37,6 +37,9 @@
   .hist a { display: flex; justify-content: space-between; color: var(--txt); text-decoration: none; padding: 10px 12px; border-radius: 12px; background: #0c1018; border: 1px solid var(--line); font-weight: 700; }
   .hist a small { color: var(--mut); font-weight: 600; }
   .note { font-size: 12px; color: #6b7487; }
+  .mine { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; border-radius: 12px; background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.35); }
+  .mine b { font-size: 22px; color: var(--ok); }
+  .mine small { color: var(--mut); }
   .live { position: absolute; left: 10px; top: 10px; padding: 4px 10px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; font: 800 12px inherit; font-family: inherit; }
   .live i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 6px; animation: blink 1s infinite; }
   @keyframes blink { 50% { opacity: .2; } }
@@ -60,6 +63,7 @@
 
   <section class="panel" id="result" hidden>
     <div class="name"><input type="text" id="name" autocomplete="off" autocapitalize="words" aria-label="Spieler"><input type="text" class="rating" id="rating" inputmode="numeric" maxlength="2" placeholder="OVR" aria-label="Wertung"></div>
+    <div class="mine" id="mine" hidden><span>Dein letzter Preis<br><small id="mineAge"></small></span><b id="minePrice"></b></div>
     <div class="chips" id="chips"></div>
     <div class="row">
       <a class="btn big" id="futbin" target="_blank" rel="noopener">FUTBIN</a>
@@ -82,6 +86,7 @@
     <div class="hist" id="hist"></div>
   </section>
 
+  <div class="note" id="mineNote"></div>
   <div class="note">Die Texterkennung läuft auf deinem Handy, die Bilder verlassen es nicht. Die Preise kommen von FUTBIN bzw. fut.gg: der Knopf öffnet deren Seite. Nicht mit EA, FUTBIN oder fut.gg verbunden.</div>
 </main>
 
@@ -183,7 +188,41 @@
     $('chips').innerHTML = hit.names.map(function (n, i) { return '<button class="chip' + (i ? '' : ' on') + '" data-n="' + n.replace(/"/g, '') + '">' + n + '</button>'; }).join('');
     links();
   }
+  // ---------- Deine Preise aus dem Sniper (Knopf „Prices → Kartenscan“ im Sniper, Reiter Market) ----------
+  var PKEY = 'kartenscan.prices';
+  function norm(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim(); }
+  function myPrices() { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch (e) { return {}; } }
+  function importPrices() {
+    var m = location.hash.match(/^#prices=(.+)$/); if (!m) return;
+    try {
+      var list = JSON.parse(decodeURIComponent(m[1])), all = myPrices(), n = 0;
+      list.forEach(function (x) { var k = norm(x[0]); if (!k || !(x[1] > 0)) return; if (!all[k] || all[k].t < x[2]) { all[k] = { n: x[0], p: x[1], t: x[2] }; n++; } });
+      try { localStorage.setItem(PKEY, JSON.stringify(all)); } catch (e) {}
+      say(n + ' Preise aus dem Sniper übernommen.');
+    } catch (e) { say('Preise aus dem Sniper konnten nicht gelesen werden.', true); }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+  // Sucht den gescannten Namen in deinen Preisen: ganzer Name, sonst Nachname (Karten zeigen meist nur ihn).
+  function findMine(name) {
+    var q = norm(name); if (q.length < 3) return null;
+    var all = myPrices(), best = null;
+    Object.keys(all).forEach(function (k) {
+      var last = k.split(' ').pop();
+      if (k === q || last === q || last === q.split(' ').pop()) { if (!best || all[k].t > best.t) best = all[k]; }
+    });
+    return best;
+  }
+  function agoDe(t) { var d = (Date.now() - t) / 60000; return d < 1 ? 'gerade eben' : d < 60 ? 'vor ' + Math.round(d) + ' Min.' : d < 1440 ? 'vor ' + Math.round(d / 60) + ' Std.' : 'vor ' + Math.round(d / 1440) + ' Tagen'; }
+  function fmtC(p) { return Number(p).toLocaleString('de-DE'); }
+  function showMine() {
+    var mine = findMine($('name').value);
+    $('mine').hidden = !mine;
+    if (mine) { $('minePrice').textContent = fmtC(mine.p); $('mineAge').textContent = mine.n + ' · ' + agoDe(mine.t); }
+    var n = Object.keys(myPrices()).length;
+    $('mineNote').textContent = n ? n + ' Spieler mit Preis aus deinem Sniper gespeichert. Neue holen: im Sniper unter Market auf „Prices → Kartenscan“.' : 'Tipp: Im Sniper unter Market auf „Prices → Kartenscan“ tippen, dann zeigt Kartenscan deine geprüften Preise direkt an.';
+  }
   function links() {
+    showMine();
     var n = $('name').value.trim(), r = $('rating').value.trim();
     $('futbin').href = 'https://www.futbin.com/players?search=' + encodeURIComponent(n);
     $('futgg').href = 'https://www.google.com/search?q=' + encodeURIComponent('fut.gg ' + n + (r ? ' ' + r : ''));
@@ -264,7 +303,7 @@
     };
     img.src = url; this.value = '';
   });
-  drawHist();
+  importPrices(); drawHist(); showMine();
   window.__parse = parse; // für Tests
   getWorker().catch(function () {}); // Texterkennung schon jetzt laden
   // Kamera schon erlaubt? Dann gleich starten, ohne Tippen.
