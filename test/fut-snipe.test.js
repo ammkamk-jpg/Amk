@@ -232,3 +232,13 @@ test("price check from the cheapest fresh listing skips a stale outlier quickly"
   assert.equal(fromFresh.price, 15000);
   assert.ok(fromFresh.searches < fromOutlier.searches, `${fromFresh.searches} vs ${fromOutlier.searches} searches`);
 });
+
+test("Kartenscan export: latest price per named player, newest first, no generic labels", () => {
+  const h = [
+    { name: "Crnogorčević", p: 15500, t: 1000 }, { name: "Crnogorčević", p: 16000, t: 2000 },
+    { name: "player #231747", p: 9000, t: 3000 }, { name: "any card", p: 16000, t: 3500 },
+    { name: "K. Mbappé", p: 250000, t: 1500 }, { name: "", p: 100, t: 4000 }, { name: "X", p: 0, t: 5000 },
+  ];
+  assert.deepEqual(P.scanExport(h), [["Crnogorčević", 16000, 2000], ["K. Mbappé", 250000, 1500]]);
+  assert.equal(P.scanExport([]).length, 0);
+});

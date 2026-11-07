@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      4.4.1
+// @version      4.5.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '4.4.1';
+  var VERSION = '4.5.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -214,8 +214,21 @@
     return pts;
   }
 
+  // Latest checked price per named card, newest first, for the Kartenscan app: [[name, price, time], ...].
+  // Generic labels ("player #123", "any card") are left out: they name no player.
+  function scanExport(history, max) {
+    var seen = {}, out = [];
+    (history || []).slice().sort(function (a, b) { return b.t - a.t; }).forEach(function (h) {
+      var n = String(h.name || '').trim();
+      if (!n || !(h.p > 0) || /^(player( #\d+)?|any card|card)$/i.test(n)) return;
+      var k = n.toLowerCase(); if (seen[k]) return; seen[k] = 1;
+      out.push([n, h.p, h.t]);
+    });
+    return out.slice(0, max || 300);
+  }
+
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport };
   }
 
   // ---------- settings & storage ----------
@@ -1421,7 +1434,16 @@
   function marketView() {
     return '<div class="fs-mkt"><svg viewBox="0 0 200 118" id="fs-m-gauge"></svg><div class="mv"><b id="fs-m-idx">—</b><span id="fs-m-lbl"></span></div></div>' +
       '<div class="ds" style="text-align:center;margin:0 6px 14px">Built from the bot’s own price checks in the last 24 h (only cards checked twice or more count). 50 = flat · higher = your cards are getting dearer · lower = cheaper.</div>' +
+      '<button class="fs-more" id="fs-to-scan">📷 Prices → Kartenscan</button>' +
       '<div class="fs-sect-h">Cards checked (24 h)</div><div id="fs-m-list"></div>';
+  }
+  // Hands the bot's latest checked price per player to the Kartenscan app (it lives on another site,
+  // so it can't read this page's storage): the list rides in the link's #fragment, which never leaves the phone.
+  var KARTENSCAN = 'https://raw.githack.com/ammkamk-jpg/Amk/card-scan/card-scan/index.html';
+  function toKartenscan() {
+    var list = scanExport(priceHist);
+    if (!list.length) { feed('No price checks with a player name yet - nothing to send to Kartenscan', 'miss'); return; }
+    window.open(KARTENSCAN + '#prices=' + encodeURIComponent(JSON.stringify(list)), '_blank');
   }
   function renderMarket($) {
     var m = marketIndex(priceHist, Date.now()), g = $('fs-m-gauge'), gh = gaugeSVG(m ? m.index : null);
@@ -1686,6 +1708,7 @@
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
         case 'fs-sell': askSellPrice(); break;
+        case 'fs-to-scan': toKartenscan(); break;
         case 'fs-wall-pick': var fi = document.getElementById('fs-wall-file'); if (fi) fi.click(); break;
         case 'fs-wall-rm': removeWallpaper(); break;
         case 'fs-mascot-test': unlockAudio(); mascotReact('win', 'uwuuu~ 💖', 'Test snipe · +662'); break;

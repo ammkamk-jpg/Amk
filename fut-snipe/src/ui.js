@@ -91,7 +91,16 @@
   function marketView() {
     return '<div class="fs-mkt"><svg viewBox="0 0 200 118" id="fs-m-gauge"></svg><div class="mv"><b id="fs-m-idx">—</b><span id="fs-m-lbl"></span></div></div>' +
       '<div class="ds" style="text-align:center;margin:0 6px 14px">Built from the bot’s own price checks in the last 24 h (only cards checked twice or more count). 50 = flat · higher = your cards are getting dearer · lower = cheaper.</div>' +
+      '<button class="fs-more" id="fs-to-scan">📷 Prices → Kartenscan</button>' +
       '<div class="fs-sect-h">Cards checked (24 h)</div><div id="fs-m-list"></div>';
+  }
+  // Hands the bot's latest checked price per player to the Kartenscan app (it lives on another site,
+  // so it can't read this page's storage): the list rides in the link's #fragment, which never leaves the phone.
+  var KARTENSCAN = 'https://raw.githack.com/ammkamk-jpg/Amk/card-scan/card-scan/index.html';
+  function toKartenscan() {
+    var list = scanExport(priceHist);
+    if (!list.length) { feed('No price checks with a player name yet - nothing to send to Kartenscan', 'miss'); return; }
+    window.open(KARTENSCAN + '#prices=' + encodeURIComponent(JSON.stringify(list)), '_blank');
   }
   function renderMarket($) {
     var m = marketIndex(priceHist, Date.now()), g = $('fs-m-gauge'), gh = gaugeSVG(m ? m.index : null);
@@ -356,6 +365,7 @@
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
         case 'fs-sell': askSellPrice(); break;
+        case 'fs-to-scan': toKartenscan(); break;
         case 'fs-wall-pick': var fi = document.getElementById('fs-wall-file'); if (fi) fi.click(); break;
         case 'fs-wall-rm': removeWallpaper(); break;
         case 'fs-mascot-test': unlockAudio(); mascotReact('win', 'uwuuu~ 💖', 'Test snipe · +662'); break;
