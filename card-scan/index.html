@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kartenscan">
+<title>Kartenscan</title>
+<style>
+  :root { --bg:#07090e; --card:#121620; --line:#232a37; --txt:#eef2f8; --mut:#8b95a8; --a1:#22d3ee; --a2:#a78bfa; --ok:#34d399; --bad:#fb7185; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--txt); font: 16px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent; }
+  main { max-width: 520px; margin: 0 auto; padding: max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); display: grid; gap: 12px; }
+  h1 { margin: 2px 0 0; font-size: 22px; font-weight: 900; background: linear-gradient(135deg, var(--a1), var(--a2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .cam { position: relative; aspect-ratio: 3 / 4; border-radius: 20px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+  .cam video, .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .guide { position: absolute; left: 20%; right: 20%; top: 12%; bottom: 12%; border: 3px solid rgba(255,255,255,.9); border-radius: 18px; box-shadow: 0 0 0 999px rgba(0,0,0,.45); pointer-events: none; }
+  .guide span { position: absolute; left: 0; right: 0; top: -30px; text-align: center; font-size: 13px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000; }
+  .cam .hint { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--mut); }
+  .row { display: flex; gap: 10px; }
+  button, .btn { flex: 1; border: 0; border-radius: 16px; padding: 16px 12px; font: 800 16px inherit; font-family: inherit; color: #0b0f1a; background: linear-gradient(135deg, var(--a1), var(--a2)); text-align: center; text-decoration: none; display: block; }
+  button.sec, .btn.sec { background: #1b2130; color: var(--txt); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: grid; gap: 10px; }
+  .status { font-size: 14px; color: var(--mut); min-height: 20px; }
+  .status.err { color: var(--bad); }
+  label { font-size: 13px; color: var(--mut); font-weight: 700; }
+  .name { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; min-width: 0; font: 700 18px inherit; font-family: inherit; color: var(--txt); background: #0c1018; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  input.rating { flex: 0 0 72px; text-align: center; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); background: #0c1018; color: var(--txt); border-radius: 999px; padding: 7px 12px; font: 700 14px inherit; font-family: inherit; flex: none; }
+  .chip.on { border-color: var(--a1); color: var(--a1); }
+  .hist { display: grid; gap: 6px; }
+  .hist a { display: flex; justify-content: space-between; color: var(--txt); text-decoration: none; padding: 10px 12px; border-radius: 12px; background: #0c1018; border: 1px solid var(--line); font-weight: 700; }
+  .hist a small { color: var(--mut); font-weight: 600; }
+  .note { font-size: 12px; color: #6b7487; }
+  #file { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kartenscan</h1>
+
+  <div class="cam" id="cam">
+    <video id="video" playsinline muted autoplay></video>
+    <img id="still" alt="" hidden>
+    <div class="guide" id="guide"><span>Karte hier ins Feld</span></div>
+    <div class="hint" id="hint">Tippe auf „Kamera starten“.<br>Halte die Karte so, dass Name und Wertung im Rahmen sind.</div>
+  </div>
+
+  <div class="row">
+    <button id="start">Kamera starten</button>
+    <button id="scan" disabled>Scannen</button>
+  </div>
+  <div class="row">
+    <button class="sec" id="pick">Foto wählen</button>
+    <button class="sec" id="torch" hidden>Licht</button>
+  </div>
+  <input type="file" id="file" accept="image/*" capture="environment">
+
+  <div class="status" id="status"></div>
+
+  <section class="panel" id="result" hidden>
+    <label for="name">Erkannter Spieler (tippen zum Korrigieren)</label>
+    <div class="name"><input type="text" id="name" autocomplete="off" autocapitalize="words"><input type="text" class="rating" id="rating" inputmode="numeric" maxlength="2" placeholder="OVR"></div>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <a class="btn" id="futbin" target="_blank" rel="noopener">Preis auf FUTBIN</a>
+      <a class="btn" id="futgg" target="_blank" rel="noopener">Preis auf fut.gg</a>
+    </div>
+  </section>
+
+  <section class="panel" id="histBox" hidden>
+    <label>Zuletzt gescannt</label>
+    <div class="hist" id="hist"></div>
+  </section>
+
+  <div class="note">Die Texterkennung läuft auf deinem Handy, die Bilder verlassen es nicht. Die Preise kommen von FUTBIN bzw. fut.gg: der Knopf öffnet deren Seite. Nicht mit EA, FUTBIN oder fut.gg verbunden.</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var video = $('video'), stream = null, worker = null, busy = false;
+
+  // ---------- Erkennung: Name und Wertung aus dem gelesenen Text ----------
+  // Auf FUT-Karten stehen ausser dem Namen nur Kürzel (Werte, Positionen) und Zahlen.
+  var STOP = ('PAC SHO PAS DRI DEF PHY DIV HAN KIC REF SPD POS ST CF LW RW LM RM CAM CM CDM LB RB CB LWB RWB GK ' +
+    'FUT EA SPORTS FC TOTW TOTS RARE ICON HERO PACE SHOOTING PASSING DRIBBLING DEFENDING PHYSICAL GOLD SILVER BRONZE ' +
+    'THE AND RATING OVR CHEM WEB APP').split(' ');
+  function parse(text) {
+    var lines = String(text || '').split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean);
+    var rating = null, seen = {}, cands = [];
+    lines.forEach(function (line, li) {
+      // Wertung: eine Zahl allein in ihrer Zeile (evtl. mit Position), nie eine Zahl hinter PAC, SHO usw.
+      if (rating == null) { var m = line.match(/^[^A-Za-z\d]{0,3}([4-9]\d)(?!\d)[^A-Za-z\d]{0,3}([A-Za-z]{1,3})?[^A-Za-z\d]{0,3}$/); if (m && (!m[2] || STOP.indexOf(m[2].toUpperCase()) >= 0)) rating = Number(m[1]); }
+      var words = line.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-žḀ-ỿ][A-Za-zÀ-ÖØ-öø-ÿĀ-žḀ-ỿ'’.\-]{2,}/g) || [];
+      var clean = words.filter(function (w) { return STOP.indexOf(w.toUpperCase().replace(/[.'’\-]/g, '')) < 0; });
+      clean.forEach(function (w) {
+        var key = w.toLowerCase(); if (seen[key]) return; seen[key] = 1;
+        var upper = w === w.toUpperCase() ? 2 : 0;                // Namen stehen auf Karten meist in Großbuchstaben
+        var alone = clean.length <= 2 && words.length <= 3 ? 3 : 0; // ... und allein in ihrer Zeile
+        cands.push({ w: tidy(w), score: alone + upper + Math.min(w.length, 10) / 10 - li * 0.05 });
+      });
+    });
+    cands.sort(function (a, b) { return b.score - a.score; });
+    return { rating: rating, names: cands.slice(0, 6).map(function (c) { return c.w; }) };
+  }
+  function tidy(w) { w = w.replace(/^[.'’\-]+|[.'’\-]+$/g, ''); return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }
+
+  // ---------- Bild vorbereiten: Ausschnitt, Graustufen, Kontrast ----------
+  function prep(src, sx, sy, sw, sh, invert) {
+    var scale = Math.min(3, 1000 / sw), c = document.createElement('canvas');
+    c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
+    var g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    var img = g.getImageData(0, 0, c.width, c.height), d = img.data, lo = 255, hi = 0, i, v;
+    for (i = 0; i < d.length; i += 4) { v = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114; d[i] = v; if (v < lo) lo = v; if (v > hi) hi = v; }
+    var k = 255 / Math.max(1, hi - lo);
+    for (i = 0; i < d.length; i += 4) { v = (d[i] - lo) * k; if (invert) v = 255 - v; d[i] = d[i + 1] = d[i + 2] = v; }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+  // Der weiße Rahmen auf dem Bildschirm, umgerechnet in Pixel des Kamerabilds (object-fit: cover).
+  function guideCrop(el, iw, ih) {
+    var r = el.getBoundingClientRect(), b = $('guide').getBoundingClientRect();
+    var s = Math.max(r.width / iw, r.height / ih), ox = (r.width - iw * s) / 2, oy = (r.height - ih * s) / 2;
+    var x = (b.left - r.left - ox) / s, y = (b.top - r.top - oy) / s, w = b.width / s, h = b.height / s;
+    x = Math.max(0, x); y = Math.max(0, y);
+    return [x, y, Math.min(w, iw - x), Math.min(h, ih - y)];
+  }
+
+  async function ocr(canvas) {
+    if (!window.Tesseract) throw new Error('Texterkennung nicht geladen (Internet?)');
+    if (!worker) { say('Texterkennung wird geladen… (nur beim ersten Mal)'); worker = await Tesseract.createWorker('eng'); }
+    var r = await worker.recognize(canvas);
+    window.__lastText = r.data.text || '';
+    return r.data.text || '';
+  }
+  async function read(src, crop) {
+    if (busy) return; busy = true; $('scan').disabled = true;
+    try {
+      say('Lese Karte…');
+      var hit = parse(await ocr(prep(src, crop[0], crop[1], crop[2], crop[3], false)));
+      if (!hit.names.length || hit.rating == null) { // zweiter Versuch mit umgekehrten Farben (helle Schrift auf dunkler Karte)
+        say('Zweiter Versuch…'); var inv = parse(await ocr(prep(src, crop[0], crop[1], crop[2], crop[3], true)));
+        hit = { names: hit.names.length ? hit.names : inv.names, rating: hit.rating != null ? hit.rating : inv.rating };
+      }
+      if (!hit.names.length) { say('Keinen Namen erkannt. Näher ran, gerade halten, Spiegelungen vermeiden, oder den Namen unten eintippen.', true); show({ names: [], rating: hit.rating }); return; }
+      say(''); show(hit); remember(hit.names[0], hit.rating);
+    } catch (e) { say(String(e.message || e), true); }
+    finally { busy = false; $('scan').disabled = !stream; }
+  }
+
+  // ---------- Ergebnis und Links ----------
+  function show(hit) {
+    $('result').hidden = false;
+    $('name').value = hit.names[0] || '';
+    $('rating').value = hit.rating || '';
+    $('chips').innerHTML = hit.names.map(function (n, i) { return '<button class="chip' + (i ? '' : ' on') + '" data-n="' + n.replace(/"/g, '') + '">' + n + '</button>'; }).join('');
+    links();
+  }
+  function links() {
+    var n = $('name').value.trim(), r = $('rating').value.trim();
+    $('futbin').href = 'https://www.futbin.com/players?search=' + encodeURIComponent(n);
+    $('futgg').href = 'https://www.google.com/search?q=' + encodeURIComponent('fut.gg ' + n + (r ? ' ' + r : ''));
+  }
+  $('chips').addEventListener('click', function (e) {
+    var b = e.target.closest('.chip'); if (!b) return;
+    $('name').value = b.getAttribute('data-n'); links();
+    [].forEach.call($('chips').children, function (c) { c.classList.toggle('on', c === b); });
+  });
+  $('name').addEventListener('input', links); $('rating').addEventListener('input', links);
+
+  // ---------- Verlauf (nur auf diesem Gerät) ----------
+  var KEY = 'kartenscan.hist';
+  function hist() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+  function remember(n, r) {
+    var h = hist().filter(function (x) { return x.n !== n; }); h.unshift({ n: n, r: r || '' });
+    try { localStorage.setItem(KEY, JSON.stringify(h.slice(0, 10))); } catch (e) {}
+    drawHist();
+  }
+  function drawHist() {
+    var h = hist(); $('histBox').hidden = !h.length;
+    $('hist').innerHTML = h.map(function (x) { return '<a target="_blank" rel="noopener" href="https://www.futbin.com/players?search=' + encodeURIComponent(x.n) + '">' + x.n.replace(/</g, '') + '<small>' + (x.r ? x.r + ' · ' : '') + 'FUTBIN</small></a>'; }).join('');
+  }
+
+  // ---------- Kamera ----------
+  function say(t, err) { $('status').textContent = t || ''; $('status').classList.toggle('err', !!err); }
+  $('start').addEventListener('click', async function () {
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; video.srcObject = null; $('start').textContent = 'Kamera starten'; $('scan').disabled = true; $('torch').hidden = true; $('hint').hidden = false; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { say('Dieser Browser gibt die Kamera nicht frei. Nimm „Foto wählen“.', true); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+      video.srcObject = stream; await video.play();
+      $('still').hidden = true; video.hidden = false; $('hint').hidden = true;
+      $('start').textContent = 'Kamera aus'; $('scan').disabled = false; say('');
+      var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {};
+      $('torch').hidden = !caps.torch;
+    } catch (e) { stream = null; say(e && e.name === 'NotAllowedError' ? 'Kamera nicht erlaubt. In den Einstellungen für diese Seite erlauben, oder „Foto wählen“.' : 'Kamera nicht verfügbar: ' + (e.message || e), true); }
+  });
+  var torchOn = false;
+  $('torch').addEventListener('click', function () { var tr = stream && stream.getVideoTracks()[0]; if (!tr) return; torchOn = !torchOn; tr.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function () {}); });
+  $('scan').addEventListener('click', function () {
+    if (!stream || !video.videoWidth) return;
+    read(video, guideCrop(video, video.videoWidth, video.videoHeight));
+  });
+  $('pick').addEventListener('click', function () { $('file').click(); });
+  $('file').addEventListener('change', function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    var img = $('still'), url = URL.createObjectURL(f);
+    img.onload = function () {
+      video.hidden = true; img.hidden = false; $('hint').hidden = true;
+      requestAnimationFrame(function () { read(img, guideCrop(img, img.naturalWidth, img.naturalHeight)); });
+    };
+    img.src = url; this.value = '';
+  });
+  drawHist();
+  window.__parse = parse; // für Tests
+})();
+</script>
+</body>
+</html>
