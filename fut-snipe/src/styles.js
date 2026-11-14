@@ -14,7 +14,7 @@
     '#fs-panel.open{display:flex;animation:fsfade .2s ease-out}@keyframes fsfade{from{opacity:0}to{opacity:1}}' +
     '#fs-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px 8px;padding-top:max(12px,env(safe-area-inset-top))}' +
     '#fs-head .t{font-weight:700;font-size:28px;letter-spacing:-.4px}#fs-head .v{font-size:12px;color:' + C_MUT2 + ';margin-left:8px;font-weight:500}' +
-    '#fs-head .coins{font-size:15px;font-weight:600;color:' + C_TXT + ';' + NUM + 'background:' + C_CARD + ';border-radius:999px;padding:6px 12px}' +
+    '#fs-head .coins{font-size:15px;font-weight:400;color:' + C_MUT + ';' + NUM + '}#fs-head .coins:after{content:" coins"}' +
     '#fs-min{background:' + C_CARD2 + ';color:' + C_MUT + ';border:0;border-radius:50%;width:30px;height:30px;font-size:13px;font-weight:700;margin-left:8px}' +
     '#fs-body{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 16px;padding-bottom:max(28px,env(safe-area-inset-bottom));width:100%;max-width:560px;margin:0 auto;overflow-x:hidden}' +
     // tabs: one segmented control
@@ -22,6 +22,18 @@
     '.fs-tile{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 4px;border-radius:7px;color:' + C_TXT + ';font-size:13px;font-weight:500;transition:background .15s}' +
     '.fs-tile.on{background:' + C_CARD3 + ';font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.4)}' +
     '.fs-tile .ti{width:7px;height:7px;border-radius:50%;display:none}.fs-tile .ti.live{display:block;background:' + C_OK + '}' +
+    // iOS grouped list (Settings app style)
+    '.ios-h{font-size:13px;line-height:1.3;color:' + C_MUT + ';text-transform:uppercase;padding:22px 16px 7px}.ios-h:empty{padding:8px 0 0}#fs-body>.ios-h:first-child,#fs-block+.ios-h{padding-top:10px}' +
+    '.ios-group{background:' + C_CARD + ';border-radius:10px;overflow:hidden}' +
+    '.ios-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:11px 16px;position:relative;background:transparent;border:0;color:' + C_TXT + ';font:17px/1.3 ' + FONT + ';text-align:left}' +
+    '.ios-row+.ios-row:before{content:"";position:absolute;left:16px;right:0;top:0;border-top:.5px solid ' + C_LINE + '}' +
+    '.ios-row .k{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ios-row .k.muted{color:' + C_MUT + '}' +
+    '.ios-row .v{flex:none;color:' + C_MUT + ';' + NUM + 'text-align:right}.ios-row .v.strong{color:' + C_TXT + ';font-weight:600}' +
+    '.ios-row .v.g,.ios-row .v .g{color:' + C_OK + '}.ios-row .v.r,.ios-row .v .r{color:' + C_RED + '}' +
+    '.ios-row.big .k{font-size:20px;font-weight:600;letter-spacing:-.3px}.ios-row.big .k.muted{font-size:17px;font-weight:400}' +
+    '.ios-row.link{cursor:pointer}.ios-row.link:active{background:' + C_CARD2 + '}.ios-row .v i{font-style:normal;color:' + C_MUT2 + ';font-size:20px;margin-left:8px;vertical-align:-1px}' +
+    '.ios-f{font-size:13px;line-height:1.35;color:' + C_MUT + ';padding:7px 16px 0}.ios-f:empty{display:none}' +
+    '#fs-start{margin-top:22px}' +
     // grouped cards
     '.fs-card,.fs-target,.fs-sect,.fs-safe,.fs-dc{background:' + C_CARD + ';border-radius:12px;margin-bottom:12px}' +
     '.fs-card{overflow:hidden}.fs-ch{font-size:13px;color:' + C_MUT + ';padding:12px 16px 0}' +
@@ -47,7 +59,7 @@
     '#fs-block{color:' + C_ORANGE + ';font-size:13px;margin:0 2px 10px}#fs-block:empty{display:none}' +
     '#fs-status{font-size:13px;color:' + C_MUT + ';margin:12px 2px 0;text-align:center}' +
     '#fs-log{margin:8px 0 0;max-height:90px;overflow:auto;white-space:pre-wrap;color:' + C_MUT2 + ';font-size:11px;line-height:1.5}#fs-log:empty{display:none}' +
-    '#fs-act{font-size:13px;color:' + C_MUT + ';text-align:center;margin:10px 2px 0;min-height:18px}' +
+    '#fs-act{font-size:13px;color:' + C_MUT + ';text-align:center;margin:10px 2px 0}#fs-act:empty{display:none}' +
     // list rows (saved searches, trades, market, sessions, bulk groups)
     '.fs-item,.fs-trade,.fs-mrow,.fs-sale,.fs-bkg{display:flex;align-items:center;gap:12px;background:' + C_CARD + ';border:0;border-radius:0;padding:11px 16px;margin:0;position:relative}' +
     '.fs-item:after,.fs-trade:after,.fs-mrow:after,.fs-sale:after,.fs-bkg:after{content:"";position:absolute;left:16px;right:0;bottom:0;border-bottom:.5px solid ' + C_LINE + '}' +
@@ -61,7 +73,7 @@
     '.fs-bar{height:4px;border-radius:999px;background:' + C_CARD3 + ';overflow:hidden;margin-top:6px}.fs-bar i{display:block;height:100%;border-radius:999px}' +
     '.fs-sale{justify-content:space-between}' +
     // section headers + settings rows (iOS grouped list)
-    '.fs-sect{padding:0 16px}.fs-sect-h{font-size:13px;color:' + C_MUT + ';text-transform:uppercase;letter-spacing:.2px;padding:18px 16px 7px;font-weight:400}' +
+    '.fs-sect{padding:0 16px}.fs-sect>.fs-set:first-child{border-top:0}.fs-sect-h{font-size:13px;color:' + C_MUT + ';text-transform:uppercase;letter-spacing:.2px;padding:18px 16px 7px;font-weight:400}' +
     '.fs-sect>.fs-sect-h{padding:12px 0 6px;margin:0}' +
     '.fs-set{padding:11px 0;border-top:.5px solid ' + C_LINE + '}.fs-sect>.fs-sect-h+.fs-set,.fs-sect>.fs-sect-h+div>.fs-set:first-child{border-top:0}' +
     '.fs-set .top{display:flex;align-items:center;justify-content:space-between;gap:12px}.fs-set .nm{font-size:15px;font-weight:400;color:' + C_TXT + '}' +

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.0.0
+// @version      5.0.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.0.0';
+  var VERSION = '5.0.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -1137,7 +1137,7 @@
     '#fs-panel.open{display:flex;animation:fsfade .2s ease-out}@keyframes fsfade{from{opacity:0}to{opacity:1}}' +
     '#fs-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px 8px;padding-top:max(12px,env(safe-area-inset-top))}' +
     '#fs-head .t{font-weight:700;font-size:28px;letter-spacing:-.4px}#fs-head .v{font-size:12px;color:' + C_MUT2 + ';margin-left:8px;font-weight:500}' +
-    '#fs-head .coins{font-size:15px;font-weight:600;color:' + C_TXT + ';' + NUM + 'background:' + C_CARD + ';border-radius:999px;padding:6px 12px}' +
+    '#fs-head .coins{font-size:15px;font-weight:400;color:' + C_MUT + ';' + NUM + '}#fs-head .coins:after{content:" coins"}' +
     '#fs-min{background:' + C_CARD2 + ';color:' + C_MUT + ';border:0;border-radius:50%;width:30px;height:30px;font-size:13px;font-weight:700;margin-left:8px}' +
     '#fs-body{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 16px;padding-bottom:max(28px,env(safe-area-inset-bottom));width:100%;max-width:560px;margin:0 auto;overflow-x:hidden}' +
     // tabs: one segmented control
@@ -1145,6 +1145,18 @@
     '.fs-tile{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 4px;border-radius:7px;color:' + C_TXT + ';font-size:13px;font-weight:500;transition:background .15s}' +
     '.fs-tile.on{background:' + C_CARD3 + ';font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.4)}' +
     '.fs-tile .ti{width:7px;height:7px;border-radius:50%;display:none}.fs-tile .ti.live{display:block;background:' + C_OK + '}' +
+    // iOS grouped list (Settings app style)
+    '.ios-h{font-size:13px;line-height:1.3;color:' + C_MUT + ';text-transform:uppercase;padding:22px 16px 7px}.ios-h:empty{padding:8px 0 0}#fs-body>.ios-h:first-child,#fs-block+.ios-h{padding-top:10px}' +
+    '.ios-group{background:' + C_CARD + ';border-radius:10px;overflow:hidden}' +
+    '.ios-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:11px 16px;position:relative;background:transparent;border:0;color:' + C_TXT + ';font:17px/1.3 ' + FONT + ';text-align:left}' +
+    '.ios-row+.ios-row:before{content:"";position:absolute;left:16px;right:0;top:0;border-top:.5px solid ' + C_LINE + '}' +
+    '.ios-row .k{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ios-row .k.muted{color:' + C_MUT + '}' +
+    '.ios-row .v{flex:none;color:' + C_MUT + ';' + NUM + 'text-align:right}.ios-row .v.strong{color:' + C_TXT + ';font-weight:600}' +
+    '.ios-row .v.g,.ios-row .v .g{color:' + C_OK + '}.ios-row .v.r,.ios-row .v .r{color:' + C_RED + '}' +
+    '.ios-row.big .k{font-size:20px;font-weight:600;letter-spacing:-.3px}.ios-row.big .k.muted{font-size:17px;font-weight:400}' +
+    '.ios-row.link{cursor:pointer}.ios-row.link:active{background:' + C_CARD2 + '}.ios-row .v i{font-style:normal;color:' + C_MUT2 + ';font-size:20px;margin-left:8px;vertical-align:-1px}' +
+    '.ios-f{font-size:13px;line-height:1.35;color:' + C_MUT + ';padding:7px 16px 0}.ios-f:empty{display:none}' +
+    '#fs-start{margin-top:22px}' +
     // grouped cards
     '.fs-card,.fs-target,.fs-sect,.fs-safe,.fs-dc{background:' + C_CARD + ';border-radius:12px;margin-bottom:12px}' +
     '.fs-card{overflow:hidden}.fs-ch{font-size:13px;color:' + C_MUT + ';padding:12px 16px 0}' +
@@ -1170,7 +1182,7 @@
     '#fs-block{color:' + C_ORANGE + ';font-size:13px;margin:0 2px 10px}#fs-block:empty{display:none}' +
     '#fs-status{font-size:13px;color:' + C_MUT + ';margin:12px 2px 0;text-align:center}' +
     '#fs-log{margin:8px 0 0;max-height:90px;overflow:auto;white-space:pre-wrap;color:' + C_MUT2 + ';font-size:11px;line-height:1.5}#fs-log:empty{display:none}' +
-    '#fs-act{font-size:13px;color:' + C_MUT + ';text-align:center;margin:10px 2px 0;min-height:18px}' +
+    '#fs-act{font-size:13px;color:' + C_MUT + ';text-align:center;margin:10px 2px 0}#fs-act:empty{display:none}' +
     // list rows (saved searches, trades, market, sessions, bulk groups)
     '.fs-item,.fs-trade,.fs-mrow,.fs-sale,.fs-bkg{display:flex;align-items:center;gap:12px;background:' + C_CARD + ';border:0;border-radius:0;padding:11px 16px;margin:0;position:relative}' +
     '.fs-item:after,.fs-trade:after,.fs-mrow:after,.fs-sale:after,.fs-bkg:after{content:"";position:absolute;left:16px;right:0;bottom:0;border-bottom:.5px solid ' + C_LINE + '}' +
@@ -1184,7 +1196,7 @@
     '.fs-bar{height:4px;border-radius:999px;background:' + C_CARD3 + ';overflow:hidden;margin-top:6px}.fs-bar i{display:block;height:100%;border-radius:999px}' +
     '.fs-sale{justify-content:space-between}' +
     // section headers + settings rows (iOS grouped list)
-    '.fs-sect{padding:0 16px}.fs-sect-h{font-size:13px;color:' + C_MUT + ';text-transform:uppercase;letter-spacing:.2px;padding:18px 16px 7px;font-weight:400}' +
+    '.fs-sect{padding:0 16px}.fs-sect>.fs-set:first-child{border-top:0}.fs-sect-h{font-size:13px;color:' + C_MUT + ';text-transform:uppercase;letter-spacing:.2px;padding:18px 16px 7px;font-weight:400}' +
     '.fs-sect>.fs-sect-h{padding:12px 0 6px;margin:0}' +
     '.fs-set{padding:11px 0;border-top:.5px solid ' + C_LINE + '}.fs-sect>.fs-sect-h+.fs-set,.fs-sect>.fs-sect-h+div>.fs-set:first-child{border-top:0}' +
     '.fs-set .top{display:flex;align-items:center;justify-content:space-between;gap:12px}.fs-set .nm{font-size:15px;font-weight:400;color:' + C_TXT + '}' +
@@ -1324,25 +1336,31 @@
     return '<div class="fs-set"><div class="top"><div class="nm">' + name + '</div><b class="sv" data-sv="' + key + '">' + cfg[key] + unit + '</b></div>' +
       '<input class="fs-range" data-k="' + key + '" data-unit="' + unit + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + cfg[key] + '">' + (desc ? '<div class="ds">' + desc + '</div>' : '') + '</div>';
   }
-  function section(title, body) { return '<div class="fs-sect"><div class="fs-sect-h">' + title + '</div>' + body + '</div>'; }
+  function section(title, body) { return '<div class="ios-h">' + title + '</div><div class="fs-sect">' + body + '</div>'; }
   // A fold-away group: closed by default, so the screen shows only what you use every day.
   function fold(title, body, sub) { return '<details class="fs-det"><summary><span>' + title + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</summary><div class="in">' + body + '</div></details>'; }
   function rebuildView() { var b = document.getElementById('fs-body'); if (b) b.setAttribute('data-tab', ''); render(); }
 
   // ---------- Sniper: what it's trading, Start, live feed, saved searches ----------
   function sniperView() {
+    // iOS grouped list: label left, value right, section titles above, hints below.
+    var row = function (label, valId, rowId, cls) { return '<div class="ios-row' + (cls ? ' ' + cls : '') + '"' + (rowId ? ' id="' + rowId + '"' : '') + '><span class="k">' + label + '</span><span class="v" id="' + valId + '">—</span></div>'; };
     return '<div id="fs-block"></div>' +
-      '<div class="fs-target"><div class="tt-top"><div><div class="k">Target</div><div class="nm" id="fs-t-name">—</div></div><div class="mode" id="fs-t-mode"></div></div>' +
-        '<div class="fs-cols"><div class="c"><div class="l">Market price</div><div class="v" id="fs-t-price">—</div></div>' +
-        '<div class="c"><div class="l">Snipe at ≤</div><div class="v c" id="fs-t-snipe">—</div></div>' +
-        '<div class="c"><div class="l">Min profit</div><div class="v g" id="fs-t-prof">—</div></div></div>' +
-        '<button class="fs-sell" id="fs-sell"></button>' +
-        '<div class="sub" id="fs-t-sub"></div></div>' +
+      '<div class="ios-h">Target</div>' +
+      '<div class="ios-group">' +
+        '<div class="ios-row big"><span class="k" id="fs-t-name">—</span><span class="v" id="fs-t-mode"></span></div>' +
+        row('Market price', 'fs-t-price', 'fs-r-price') +
+        '<div class="ios-row"><span class="k" id="fs-l-snipe">Snipe at or below</span><span class="v strong" id="fs-t-snipe">—</span></div>' +
+        row('Profit per card', 'fs-t-prof', 'fs-r-prof') +
+        '<button class="ios-row link" id="fs-sell"></button>' +
+      '</div><div class="ios-f" id="fs-t-sub"></div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
-      '<div class="fs-run"><div><span>Bought</span><b id="fs-s-buys">0</b></div><div><span>Searches</span><b id="fs-s-sr">0</b></div><div><span>Est. profit</span><b id="fs-s-est">—</b></div><div><span>Coins net</span><b id="fs-s-net">—</b></div></div>' +
+      '<div class="ios-h">This run</div>' +
+      '<div class="ios-group">' + row('Bought', 'fs-s-buys') + row('Searches', 'fs-s-sr') + row('Estimated profit', 'fs-s-est') + row('Coins net', 'fs-s-net') + '</div>' +
       '<div class="fs-feed"></div>' +
-      fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? filters.length + ' saved' : '') +
+      '<div class="ios-h"></div>' +
+      fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? String(filters.length) : '') +
       '<div id="fs-status"></div>';
   }
   function filtersHTML() {
@@ -1723,19 +1741,22 @@
     var sb = $('fs-sell');
     if (sb) {
       sb.style.display = keep ? 'none' : '';
-      var sh = 'Sell at <b>' + (cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) + '</b> <i>yours</i>' : (market.price ? fmt(market.price) : 'market price') + '</b> <i>auto</i>') + '<span>✎ change</span>';
+      var sh = '<span class="k">Sell price</span><span class="v">' + (cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto' + (market.price ? ' · ' + fmt(market.price) : '')) + '<i>›</i></span>';
       if (sb.__html !== sh) { sb.__html = sh; sb.innerHTML = sh; }
     }
-    if ($('fs-t-name')) $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'Search a player in the market';
-    if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Keep · Unassigned' : 'Keep · Transfer list') : 'List · ' + durLabel(cfg.listDur);
+    if ($('fs-t-name')) { $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'No search yet'; $('fs-t-name').className = 'k' + (haveSearch() ? '' : ' muted'); }
+    if ($('fs-r-price')) $('fs-r-price').style.display = keep ? 'none' : '';
+    if ($('fs-r-prof')) $('fs-r-prof').style.display = keep ? 'none' : '';
+    if ($('fs-l-snipe')) $('fs-l-snipe').textContent = keep ? 'Buy at or below' : 'Snipe at or below';
+    if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Unassigned' : 'Transfer list') : 'List · ' + durLabel(cfg.listDur);
     if ($('fs-t-price')) $('fs-t-price').textContent = keep ? 'no check' : market.price ? fmt(market.price) : (phase === 'checking' ? '…' : '—');
     if ($('fs-t-snipe')) $('fs-t-snipe').textContent = keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : 'set price') : market.snipe ? fmt(market.snipe) : '—';
     if ($('fs-t-prof')) $('fs-t-prof').textContent = keep ? '—' : pr != null ? signed(pr) : '+' + fmt(cfg.minProfit);
-    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? (webMaxBuy() ? 'Max. Buy Now of your web app search' : keepMaxNow() ? 'fallback price from Settings · type a Max. Buy Now in the web app search to use that' : 'type a Max. Buy Now into the web app search') + (keepMinNow() > 0 ? ' · min ' + fmt(keepMinNow()) : '') : market.snipe ? ('step ' + fmt(stepFor(market.price)) + (market.fresh ? '' : ' · no fresh listings') + ' · checked ' + ago(market.checkedAt) + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '')) : 'Start checks the market price first, then snipes below it.';
+    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? (webMaxBuy() ? 'Price from your web app search (Max. Buy Now).' : keepMaxNow() ? 'Fallback from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then Start.') + (keepMinNow() > 0 ? ' Min ' + fmt(keepMinNow()) + '.' : '') : !haveSearch() ? 'Search a player in the transfer market, then come back here.' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '.') : 'Start checks the market price, then snipes below it.';
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
     if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
-    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
-    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = net != null && net < 0 ? 'r' : net ? 'g' : ''; }
+    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = 'v' + (stats.est < 0 ? ' r' : stats.buys ? ' g' : ''); }
+    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : ''); }
     var fl = $('fs-filters'), fh = filtersHTML(); if (fl && fl.__html !== fh) { fl.__html = fh; fl.innerHTML = fh; }
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
     if ($('fs-act')) $('fs-act').textContent = activity;
@@ -1743,10 +1764,7 @@
     if (go) {
       // Only touch the DOM when it changes, so a tap is never lost to a re-render.
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
-      var html = running
-        ? 'Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
-        : keep ? 'Start<span class="sub">buys at ≤ ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
-        : 'Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
+      var html = running ? 'Stop' : 'Start';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
