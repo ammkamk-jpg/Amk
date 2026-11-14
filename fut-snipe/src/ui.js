@@ -1,4 +1,20 @@
   // ---------- UI ----------
+  // Small line icons (24 px grid, stroke = currentColor).
+  function icon(d) { return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>'; }
+  var ICON = {
+    play: icon('<path d="M8 5v14l11-7z"/>'),
+    grid: icon('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+    gear: icon('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>'),
+    bolt: icon('<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>'),
+    tag: icon('<path d="M3.5 12.5V4.5a1 1 0 0 1 1-1h8l8 8-9 9z"/><circle cx="8.5" cy="8.5" r="1.4"/>'),
+    target: icon('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+    box: icon('<path d="m4 7.5 8-4 8 4-8 4z"/><path d="M4 7.5v9l8 4 8-4v-9M12 11.5v9"/>'),
+    clock: icon('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+    list: icon('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>'),
+    coins: icon('<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>'),
+    refresh: icon('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>'),
+    pack: icon('<rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/>')
+  };
   var logLines = [], activity = '';
   function log(m) { logLines.unshift(new Date().toLocaleTimeString() + '  ' + m); logLines = logLines.slice(0, 30); var b = document.getElementById('fs-log'); if (b) b.textContent = logLines.join('\n'); }
   // What the bot is doing right now (status line only; events go to the feed, see feed()).
@@ -51,21 +67,22 @@
 
   // ---------- Sniper: what it's trading, Start, live feed, saved searches ----------
   function sniperView() {
-    // iOS grouped list: label left, value right, section titles above, hints below.
-    var row = function (label, valId, rowId, cls) { return '<div class="ios-row' + (cls ? ' ' + cls : '') + '"' + (rowId ? ' id="' + rowId + '"' : '') + '><span class="k">' + label + '</span><span class="v" id="' + valId + '">—</span></div>'; };
+    var srow = function (id, ic, label) { return '<button class="sx-row" id="' + id + '"><span class="ic">' + ic + '</span><span class="k">' + label + '</span><span class="v" id="' + id + '-v"></span><span class="chev"></span></button>'; };
+    var stat = function (id, label) { return '<div><b id="' + id + '">0</b><span>' + label + '</span></div>'; };
     return '<div id="fs-block"></div>' +
-      '<div class="ios-h">Target</div>' +
-      '<div class="ios-group">' +
-        '<div class="ios-row big"><span class="k" id="fs-t-name">—</span><span class="v" id="fs-t-mode"></span></div>' +
-        row('Market price', 'fs-t-price', 'fs-r-price') +
-        '<div class="ios-row"><span class="k" id="fs-l-snipe">Snipe at or below</span><span class="v strong" id="fs-t-snipe">—</span></div>' +
-        row('Profit per card', 'fs-t-prof', 'fs-r-prof') +
-        '<button class="ios-row link" id="fs-sell"></button>' +
-      '</div><div class="ios-f" id="fs-t-sub"></div>' +
+      '<div class="sx-sum">' +
+        '<div class="sx-k" id="fs-t-kicker">Target</div><div class="sx-name" id="fs-t-name">—</div><div class="sx-sub" id="fs-t-mode"></div>' +
+        '<div class="sx-3">' +
+          '<div><span id="fs-l-snipe">Snipe under</span><b id="fs-t-snipe">—</b><small id="fs-t-price"></small></div>' +
+          '<div><span id="fs-l-sell">Sell at</span><b id="fs-t-sell">—</b><small id="fs-t-sellsub"></small></div>' +
+          '<div><span id="fs-l-prof">Profit</span><b id="fs-t-prof">—</b><small id="fs-t-profsub"></small></div>' +
+        '</div></div>' +
+      '<div class="sx-note" id="fs-t-sub"></div>' +
+      '<div class="sx-rows">' + srow('fs-r-speed', ICON.bolt, 'Speed mode') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
+        srow('fs-r-after', ICON.box, 'After buying') + srow('fs-r-dur', ICON.clock, 'List for') + '</div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
-      '<div class="ios-h">This run</div>' +
-      '<div class="ios-group">' + row('Bought', 'fs-s-buys') + row('Searches', 'fs-s-sr') + row('Estimated profit', 'fs-s-est') + row('Coins net', 'fs-s-net') + '</div>' +
+      '<div class="sx-stats">' + stat('fs-s-buys', 'Bought') + stat('fs-s-sr', 'Searches') + stat('fs-s-est', 'Est. profit') + stat('fs-s-net', 'Coins net') + '</div>' +
       '<div class="fs-feed"></div>' +
       '<div class="ios-h"></div>' +
       fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? String(filters.length) : '') +
@@ -184,14 +201,15 @@
         '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
-      '<div class="fs-hubbtns">' +
-        '<button class="fs-hb" id="fs-h-bulk"><b>List many at one price</b><span>pick a player on your transfer list · one price for all</span></button>' +
-        '<button class="fs-hb" id="fs-h-clear"><b>Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
-        '<button class="fs-hb" id="fs-h-exp"><b>Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
-        '<button class="fs-hb" id="fs-h-packs"><b>List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
+      '<div class="ios-h">Tools</div><div class="fs-hubbtns">' +
+        hubTool('fs-h-bulk', ICON.list, 'List many at one price', 'Pick a player on your transfer list, one price for all', '') +
+        hubTool('fs-h-clear', ICON.coins, 'Book &amp; clear sold', 'refresh first', 'fs-h-clear-s') +
+        hubTool('fs-h-exp', ICON.refresh, 'Re-price &amp; relist expired', 'refresh first', 'fs-h-exp-s') +
+        hubTool('fs-h-packs', ICON.pack, 'List pack pulls', 'refresh first', 'fs-h-packs-s') +
       '</div>' +
       fold('Sessions', '<div id="fs-h-sessions"></div>');
   }
+  function hubTool(id, ic, title, sub, subId) { return '<button class="fs-hb" id="' + id + '"><span class="ic">' + ic + '</span><span class="tx"><b>' + title + '</b><span' + (subId ? ' id="' + subId + '"' : '') + '>' + sub + '</span></span><span class="chev"></span></button>'; }
   function bulkView() {
     var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>List many at one price</b></div>';
     if (bulk.loading) return h + '<div class="fs-empty">Reading your transfer list…</div>';
@@ -332,12 +350,12 @@
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
     el.innerHTML =
-      '<div id="fs-head"><div><span class="t">Sniper</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
+      '<div id="fs-head"><div class="brand"><span class="logo">' + ICON.bolt + '</span><span class="t">TangaTolga<span class="v">v' + VERSION + '</span></span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tiles">' +
-        '<div class="fs-tile" data-tab="snipe"><span class="tl">Sniper</span><span class="ti" id="fs-ti-run"></span></div>' +
-        '<div class="fs-tile" data-tab="hub"><span class="tl">Hub</span></div>' +
-        '<div class="fs-tile" data-tab="market"><span class="tl">Market</span></div>' +
-        '<div class="fs-tile" data-tab="settings"><span class="tl">Settings</span></div>' +
+        '<div class="fs-tile" data-tab="snipe"><div class="ti" id="fs-ti-run">' + ICON.play + '</div><div class="tl">Sniper</div></div>' +
+        '<div class="fs-tile" data-tab="hub"><div class="ti">' + ICON.grid + '</div><div class="tl">My Hub</div></div>' +
+        '<div class="fs-tile" data-tab="market"><div class="tg"><svg viewBox="0 0 200 118" id="fs-ti-gauge"></svg><b id="fs-ti-idx">—</b></div><div class="tl">Market</div></div>' +
+        '<div class="fs-tile" data-tab="settings"><div class="ti">' + ICON.gear + '</div><div class="tl">Settings</div></div>' +
       '</div><div id="fs-body"></div>';
     document.body.appendChild(el);
     var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 2 4.5 13.6h6.3L9.6 22l9-11.6h-6.3z"/></svg><span class="dot"></span>';
@@ -379,6 +397,10 @@
       switch (tg.id) {
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
         case 'fs-sell': askSellPrice(); break;
+        case 'fs-r-speed': cfg.speed = ((cfg.speed | 0) + 1) % 3; applySpeed(); save(); render(); break;
+        case 'fs-r-after': cfg.afterBuy = ((cfg.afterBuy | 0) + 1) % 3; save(); render(); break;
+        case 'fs-r-dur': var di = LIST_DURS.map(function (d) { return d[1]; }).indexOf(cfg.listDur); cfg.listDur = LIST_DURS[(di + 1) % LIST_DURS.length][1]; save(); render(); break;
+        case 'fs-r-prof': var mp = window.prompt('Minimum profit per card (after EA’s 5% tax)', cfg.minProfit); if (mp != null) { var mv = parseCoins(mp); if (mv != null && mv >= 0) { cfg.minProfit = mv; save(); applySell(); } render(); } break;
         case 'fs-to-scan': toKartenscan(); break;
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
@@ -446,25 +468,31 @@
 
     // Sniper view
     var keep = keepMode(), pr = market.snipe && !keep ? profitAt(listPrice(), market.snipe) : null;
-    var sb = $('fs-sell');
-    if (sb) {
-      sb.style.display = keep ? 'none' : '';
-      var sh = '<span class="k">Sell price</span><span class="v">' + (cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto' + (market.price ? ' · ' + fmt(market.price) : '')) + '<i>›</i></span>';
-      if (sb.__html !== sh) { sb.__html = sh; sb.innerHTML = sh; }
-    }
-    if ($('fs-t-name')) { $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'No search yet'; $('fs-t-name').className = 'k' + (haveSearch() ? '' : ' muted'); }
-    if ($('fs-r-price')) $('fs-r-price').style.display = keep ? 'none' : '';
-    if ($('fs-r-prof')) $('fs-r-prof').style.display = keep ? 'none' : '';
-    if ($('fs-l-snipe')) $('fs-l-snipe').textContent = keep ? 'Buy at or below' : 'Snipe at or below';
-    if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Unassigned' : 'Transfer list') : 'List · ' + durLabel(cfg.listDur);
-    if ($('fs-t-price')) $('fs-t-price').textContent = keep ? 'no check' : market.price ? fmt(market.price) : (phase === 'checking' ? '…' : '—');
-    if ($('fs-t-snipe')) $('fs-t-snipe').textContent = keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : 'set price') : market.snipe ? fmt(market.snipe) : '—';
-    if ($('fs-t-prof')) $('fs-t-prof').textContent = keep ? '—' : pr != null ? signed(pr) : '+' + fmt(cfg.minProfit);
-    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? (webMaxBuy() ? 'Price from your web app search (Max. Buy Now).' : keepMaxNow() ? 'Fallback from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then Start.') + (keepMinNow() > 0 ? ' Min ' + fmt(keepMinNow()) + '.' : '') : !haveSearch() ? 'Search a player in the transfer market, then come back here.' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '.') : 'Start checks the market price, then snipes below it.';
+    var T = function (id, v) { var e = $(id); if (e && e.textContent !== String(v)) e.textContent = v; };
+    T('fs-t-kicker', keep ? 'Target · keep' : 'Target · list & flip');
+    if ($('fs-t-name')) { T('fs-t-name', haveSearch() ? searchLabel() : 'No search yet'); $('fs-t-name').className = 'sx-name' + (haveSearch() ? '' : ' muted'); }
+    T('fs-t-mode', !haveSearch() ? 'Search a player in the transfer market' : keep ? (cfg.afterBuy === 2 ? 'Bought cards stay in Unassigned' : 'Bought cards go to your transfer list') : 'Bought under the market, listed at the sell price');
+    T('fs-l-snipe', keep ? 'Buy under' : 'Snipe under');
+    T('fs-t-snipe', keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '—') : market.snipe ? fmt(market.snipe) : '—');
+    T('fs-t-price', keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
+    T('fs-l-sell', keep ? 'Min price' : 'Sell at');
+    T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : market.price ? fmt(market.price) : 'Auto');
+    T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : cfg.sellPrice > 0 ? 'your price' : 'Auto · market');
+    T('fs-l-prof', keep ? 'Then' : 'Profit');
+    T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
+    if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
+    T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
+    T('fs-t-sub', keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    T('fs-r-speed-v', ['Night', 'Normal', 'Turbo'][cfg.speed | 0] || 'Normal');
+    T('fs-sell-v', cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto');
+    T('fs-r-prof-v', fmt(cfg.minProfit));
+    T('fs-r-after-v', ['List', 'Transfer list', 'Unassigned'][cfg.afterBuy | 0] || 'List');
+    T('fs-r-dur-v', durLabel(cfg.listDur));
+    ['fs-sell', 'fs-r-prof', 'fs-r-dur'].forEach(function (id) { var e = $(id); if (e) e.style.display = keep ? 'none' : ''; });
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
     if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
-    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = 'v' + (stats.est < 0 ? ' r' : stats.buys ? ' g' : ''); }
-    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = 'v' + (net != null && net < 0 ? ' r' : net ? ' g' : ''); }
+    if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
+    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = net != null && net < 0 ? 'r' : net ? 'g' : ''; }
     var fl = $('fs-filters'), fh = filtersHTML(); if (fl && fl.__html !== fh) { fl.__html = fh; fl.innerHTML = fh; }
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
     if ($('fs-act')) $('fs-act').textContent = activity;
@@ -472,7 +500,9 @@
     if (go) {
       // Only touch the DOM when it changes, so a tap is never lost to a re-render.
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
-      var html = running ? 'Stop' : 'Start';
+      var html = running ? 'Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
+        : keep ? 'Start Sniping<span class="sub">buys under ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + '</span>'
+        : 'Check Price &amp; Start Sniping<span class="sub">' + (market.snipe ? 'snipes under ' + fmt(market.snipe) + ' · profit ' + fmt(pr != null ? pr : cfg.minProfit) + '+' : 'target profit ' + fmt(cfg.minProfit) + '+ per card') + '</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
