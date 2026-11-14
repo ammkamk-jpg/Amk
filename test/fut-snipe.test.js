@@ -242,3 +242,23 @@ test("Kartenscan export: latest price per named player, newest first, no generic
   assert.deepEqual(P.scanExport(h), [["Crnogorčević", 16000, 2000], ["K. Mbappé", 250000, 1500]]);
   assert.equal(P.scanExport([]).length, 0);
 });
+
+test("bulk list: groups waiting cards per exact version, most copies first", () => {
+  const row = (def, state, extra) => Object.assign({ def, name: "P" + def, rating: 88, state, tradable: true, player: true, it: { def, state } }, extra);
+  const g = P.bulkGroups([
+    row(1, "unlisted"), row(1, "expired"), row(1, "active"), row(1, "closed"),
+    row(2, "unlisted"), row(2, "unlisted"), row(2, "unlisted"),
+    row(3, "unlisted", { tradable: false }), row(4, "unlisted", { player: false }), row(null, "unlisted"),
+  ]);
+  assert.deepEqual(g.map((x) => [x.def, x.count, x.expired, x.items.length]), [[2, 3, 0, 3], [1, 2, 1, 2]]);
+  assert.deepEqual(P.bulkGroups([]), []);
+});
+
+test("bulk list: one valid Buy Now and start price", () => {
+  assert.deepEqual(P.bulkPrices(25000, ""), { buy: 25000, start: 24750, adjusted: false });
+  assert.deepEqual(P.bulkPrices("25.040", 0), { buy: 25000, start: 24750, adjusted: true }, "snapped down to the price step");
+  assert.deepEqual(P.bulkPrices(25000, 20000), { buy: 25000, start: 20000, adjusted: false });
+  assert.ok(P.bulkPrices(25000, 25000).err, "start must be below buy now");
+  assert.ok(P.bulkPrices(0).err); assert.ok(P.bulkPrices(100).err);
+  assert.equal(P.bulkPrices(200, "").start, 150);
+});

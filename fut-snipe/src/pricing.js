@@ -170,6 +170,31 @@
     return pts;
   }
 
+  // Bulk list: cards waiting on the transfer list (not listed, or expired), grouped by exact card
+  // version, most copies first. rows: [{def, name, rating, state, tradable, player, it}].
+  function bulkGroups(rows) {
+    var by = {}, out = [];
+    (rows || []).forEach(function (r) {
+      if (!r || r.def == null || !r.player || r.tradable === false) return;
+      if (r.state !== 'unlisted' && r.state !== 'expired') return;
+      var k = String(r.def), g = by[k];
+      if (!g) { g = by[k] = { def: r.def, name: r.name || 'Card', rating: r.rating || null, count: 0, expired: 0, items: [] }; out.push(g); }
+      g.count++; if (r.state === 'expired') g.expired++; g.items.push(r.it);
+    });
+    return out.sort(function (a, b) { return b.count - a.count || String(a.name).localeCompare(String(b.name)); });
+  }
+  // One Buy Now (and start) price for a bulk listing: snapped down to EA's price steps; start is one
+  // step under Buy Now unless given. Returns {buy, start, adjusted} or {err}.
+  function bulkPrices(buyNow, start) {
+    var raw = Number(String(buyNow == null ? '' : buyNow).replace(/[^\d]/g, '')) || 0, b = floorStep(raw);
+    if (!(b >= MIN_PRICE + stepFor(MIN_PRICE))) return { err: 'Set a Buy Now price of at least ' + (MIN_PRICE + stepFor(MIN_PRICE)) + '.' };
+    var rs = Number(String(start == null ? '' : start).replace(/[^\d]/g, '')) || 0;
+    var s = rs > 0 ? floorStep(rs) : floorStep(b - stepFor(b));
+    if (s < MIN_PRICE) s = MIN_PRICE;
+    if (s >= b) return { err: 'The start price must be below the Buy Now price.' };
+    return { buy: b, start: s, adjusted: b !== raw || (rs > 0 && s !== rs) };
+  }
+
   // Latest checked price per named card, newest first, for the Kartenscan app: [[name, price, time], ...].
   // Generic labels ("player #123", "any card") are left out: they name no player.
   function scanExport(history, max) {
@@ -184,5 +209,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices };
   }

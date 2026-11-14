@@ -128,6 +128,61 @@
     return 'pack pulls: ' + listed + ' listed, ' + kept + ' kept';
   }
 
+  // ---------- Bulk list: many copies of one card at one price (e.g. 90 investment 88s) ----------
+  var bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+  function bulkRows(items) {
+    return items.map(function (it) {
+      var st = tradeStateOf(it);
+      return { it: it, def: defIdOf(it), name: nameOf(it) || 'Card', rating: ratingOf(it), tradable: isTradable(it), player: isPlayer(it),
+        state: st === 'closed' ? 'closed' : st === 'active' ? 'active' : isExpired(it) ? 'expired' : 'unlisted' };
+    });
+  }
+  function lastPriceOf(def) { for (var i = priceHist.length - 1; i >= 0; i--) if (String(priceHist[i].id) === String(def)) return priceHist[i].p; return 0; }
+  async function openBulk() {
+    if (running) return;
+    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' }; rebuildView();
+    var items = await refreshHub(false);
+    bulk.loading = false;
+    if (!items) bulk.err = 'Could not read the transfer list. Open the Transfers tab in the web app once, then try again.';
+    else bulk.groups = bulkGroups(bulkRows(items));
+    rebuildView();
+  }
+  function pickBulk(i) {
+    var g = bulk.groups && bulk.groups[i]; if (!g) return;
+    bulk.sel = g; bulk.n = g.count; bulk.price = lastPriceOf(g.def); bulk.start = ''; bulk.err = ''; rebuildView();
+  }
+  function saveBulkInputs() {
+    var v = function (id) { var e = document.getElementById(id); return e ? e.value : null; };
+    if (v('fs-bk-price') != null) bulk.price = v('fs-bk-price');
+    if (v('fs-bk-start') != null) bulk.start = v('fs-bk-start');
+    if (v('fs-bk-n') != null) bulk.n = v('fs-bk-n');
+  }
+  async function runBulk(g, p, n, dur) {
+    var todo = g.items.slice(0, n), done = 0, fails = 0;
+    for (var i = 0; i < todo.length && running; i++) {
+      var it = todo[i];
+      setActivity('📋 Listing ' + (i + 1) + ' of ' + todo.length + ': ' + g.name + ' at ' + fmt(p.buy));
+      if (i === 0 && !(await rangeOk(it, p.buy))) return 'price is outside EA\u2019s range for this card - nothing listed';
+      await sleep(rand(1100, 2600)); if (!running) break;
+      if (await listItem(it, p.start, p.buy, dur)) { done++; fails = 0; noteList(it.id, p.buy); if (done % 10 === 0) feed('📋 ' + done + ' of ' + todo.length + ' listed', 'list'); }
+      else if (++fails >= 2) { feed('Listing failed twice in a row - stopped. EA busy or a captcha? Check the web app.', 'stop'); break; }
+      else feed('Listing one ' + g.name + ' failed - trying the next', 'miss');
+    }
+    return 'listed ' + done + ' of ' + todo.length + ' × ' + g.name + ' at ' + fmt(p.buy);
+  }
+  function startBulk() {
+    var g = bulk.sel; if (!g) return;
+    var p = bulkPrices(bulk.price, bulk.start);
+    if (p.err) { bulk.err = p.err; rebuildView(); return; }
+    var n = Math.max(1, Math.min(g.count, Math.round(Number(bulk.n) || g.count))), dur = bulk.dur || cfg.listDur || 3600;
+    if (!window.confirm('List ' + n + ' × ' + g.name + '\nBuy Now ' + fmt(p.buy) + ' · start ' + fmt(p.start) + ' · ' + durLabel(dur) + (p.adjusted ? '\n(price snapped to EA\u2019s price steps)' : '') + '\n\nGo?')) return;
+    if (!canStart()) return;
+    tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+    running = true; mode = 'job'; phase = 'job';
+    feed('📋 Listing ' + n + ' × ' + g.name + ' at ' + fmt(p.buy) + ' (start ' + fmt(p.start) + ', ' + durLabel(dur) + ')', 'check'); rebuildView();
+    runBulk(g, p, n, dur).then(function (msg) { if (running) requestStop('Done: ' + msg); refreshHub(true); }).catch(function (e) { requestStop('bulk list error: ' + e); });
+  }
+
   // Hub buttons that need searches run like a short sniping run (lock screen, Stop works).
   function startJob(kind) {
     if (!canStart()) return;

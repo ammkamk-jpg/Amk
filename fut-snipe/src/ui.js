@@ -45,6 +45,9 @@
       '<input class="fs-range" data-k="' + key + '" data-unit="' + unit + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + cfg[key] + '">' + (desc ? '<div class="ds">' + desc + '</div>' : '') + '</div>';
   }
   function section(title, body) { return '<div class="fs-sect"><div class="fs-sect-h">' + title + '</div>' + body + '</div>'; }
+  // A fold-away group: closed by default, so the screen shows only what you use every day.
+  function fold(title, body, sub) { return '<details class="fs-det"><summary><span>' + title + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</summary><div class="in">' + body + '</div></details>'; }
+  function rebuildView() { var b = document.getElementById('fs-body'); if (b) b.setAttribute('data-tab', ''); render(); }
 
   // ---------- Sniper: what it's trading, Start, live feed, saved searches ----------
   function sniperView() {
@@ -59,8 +62,7 @@
       '<div id="fs-act"></div>' +
       '<div class="fs-run"><div><span>Bought</span><b id="fs-s-buys">0</b></div><div><span>Searches</span><b id="fs-s-sr">0</b></div><div><span>Est. profit</span><b id="fs-s-est">—</b></div><div><span>Coins net</span><b id="fs-s-net">—</b></div></div>' +
       '<div class="fs-feed"></div>' +
-      '<div class="fs-sect-h" style="margin-top:16px">Saved searches</div><div id="fs-filters"></div>' +
-      '<button class="fs-more" id="fs-savefilter">★ Save the current market search</button>' +
+      fold('★ Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">★ Save the current market search</button>', filters.length ? filters.length + ' saved' : '') +
       '<div id="fs-status"></div><pre id="fs-log"></pre>';
   }
   function filtersHTML() {
@@ -119,7 +121,37 @@
 
   // ---------- Settings: grouped, each one explained ----------
   function settingsView() {
-    return section('Look',
+    return section('Sniping',
+        setting('Target profit per card', ctlNum('minProfit'), 'Coins per card after EA\u2019s 5% tax.') +
+        setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
+        segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
+        segSetting('List for', 'listDur', LIST_DURS, '') +
+        segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]], '<span id="fs-speedhint">' + speedHint() + '</span>')) +
+      fold('🛡 Safety stops',
+        setting('Too many results stop (10+)', ctlSw('tooManyStop'), 'Manual price: 10+ cards at your price = probably a typo in the price. Stops before buying.') +
+        setting('Price range stop', ctlSw('rangeStop'), 'Never lists outside EA\u2019s allowed price range.') +
+        setting('Keep special versions', ctlSw('keepSpecials'), 'A TOTW/special caught by a player search is kept, not sold at the normal price.') +
+        setting('Session buy cap', ctlNum('sessionBuyCap'), '') +
+        setting('Daily buy cap', ctlNum('dailyBuyCap'), '') +
+        setting('Run minutes', ctlNum('runMinutes'), '0 = no limit.'), 'on') +
+      fold('📋 Transfer list',
+        setting('Relist expired cards', ctlSw('relistExpired'), 'While sniping.') +
+        setting('Re-price expired first', ctlSw('repriceExpired'), 'Today\u2019s price, never below break-even. Off = same price.') +
+        segSetting('Clear sold items', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]], '') +
+        setting('Pack pulls: list if worth at least', ctlNum('packMin'), '')) +
+      fold('⚙️ Fine-tuning',
+        rangeSetting('Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches', '') +
+        setting('Vary min bid', ctlSw('varyMinBid'), 'Fresh results on every search.') +
+        rangeSetting('Break every ~', 'breakEvery', 20, 120, 5, ' searches', '') +
+        rangeSetting('Break length', 'breakSec', 15, 300, 5, 's', '') +
+        '<div id="fs-keep">' + setting('Fallback buy price', ctlNum('keepMax'), 'Only used when your web app search has no Max. Buy Now.') +
+          setting('Fallback min price', ctlNum('keepMin'), 'Only used when your web app search has no Min. Buy Now. 0 = off.') + '</div>') +
+      fold('🔔 Alerts',
+        segSetting('Snipe sound', 'sound', SOUNDS, 'Tap one to hear it.') +
+        setting('Vibrate on snipe', ctlSw('vibrate'), '') +
+        setting('Price tags on cards', ctlSw('badges'), 'EA\u2019s AVG value under every card.') +
+        '<button class="fs-more" id="fs-test">🎉 Test the snipe celebration</button>') +
+      fold('🎨 Look',
         segSetting('Theme', 'theme', THEMES.map(function (t, i) { return [t.name, i]; }), 'Sakura = pink anime style with falling cherry blossoms. Neon = pink / cyan.') +
         '<div class="fs-set"><div class="top"><div class="nm">Wallpaper</div><span class="sv" id="fs-wall-st"></span></div>' +
           '<div class="fs-wallrow"><button class="pick" id="fs-wall-pick">🖼 Choose a picture</button><button id="fs-wall-rm">Remove</button></div>' +
@@ -133,39 +165,9 @@
           setting('Mascot voice', ctlSw('mascotVoice'), 'On iPhone, sound starts working after you tap Start (or the test button).') +
           '<button class="fs-more" id="fs-mascot-test">💖 Test her</button>') +
         setting('Falling petals', ctlSw('petals'), 'Cherry blossoms drifting in the background, in the theme\u2019s colours.')) +
-      section('Sniping',
-        setting('Target profit per card', ctlNum('minProfit'), 'Coins you want to make per card after EA’s 5% tax. The snipe point is the sell price minus tax minus this, rounded down to EA’s price steps.') +
-        setting('Sell price', ctlNum('sellPrice'), '0 = auto (the checked market price). Set your own and bought cards are listed there; the snipe point follows so your target profit still holds. Also on the Sniper card.') +
-        segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + auto-relist. Transfer list / Unassigned = no price check, you set the buy price below.') +
-        '<div id="fs-keep">' + setting('Buy at or below', ctlNum('keepMax'), 'The most you pay per card (Transfer list / Unassigned mode).') +
-          setting('Min price', ctlNum('keepMin'), 'Cards cheaper than this are skipped. 0 = off.') + '</div>' +
-        segSetting('List for', 'listDur', LIST_DURS, 'How long bought cards are listed.') +
-        rangeSetting('Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches', 'The market moves: the bot checks the price again after about this many searches (the exact number varies).')) +
-      section('Search settings',
-        segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]], '<span id="fs-speedhint">' + speedHint() + '</span> · never faster than this, gaps vary like a person’s. Night is the safest.') +
-        setting('Vary min bid', ctlSw('varyMinBid'), 'A different min bid (0-1,000) on every search so EA always returns fresh results instead of a cached page.') +
-        rangeSetting('Break every ~', 'breakEvery', 20, 120, 5, ' searches', 'A longer pause after about this many searches.') +
-        rangeSetting('Break length', 'breakSec', 15, 300, 5, 's', 'How long that pause lasts (varies ±20%).')) +
-      section('Safety stops',
-        setting('Too many results stop (10+)', ctlSw('tooManyStop'), 'Manual price only: if a search finds 10+ cards at your price, the filter is probably wrong (e.g. 10,000 instead of 1,000). Stops before buying.') +
-        setting('Price range stop', ctlSw('rangeStop'), 'Stops if the list price would be outside EA’s allowed price range for the card.') +
-        setting('Keep special versions', ctlSw('keepSpecials'), 'A player search without a rarity can buy a TOTW/special under the normal card’s price. It’s kept unlisted (not sold at the normal price) and you get its real value.') +
-        setting('Session buy cap', ctlNum('sessionBuyCap'), 'Stop after this many buys in one run.') +
-        setting('Daily buy cap', ctlNum('dailyBuyCap'), 'Stop after this many buys in a day.') +
-        setting('Run minutes', ctlNum('runMinutes'), 'Stop after this many minutes. 0 = no limit.')) +
-      section('Transfer list',
-        setting('Relist expired cards', ctlSw('relistExpired'), 'While sniping, unsold cards go back up automatically.') +
-        setting('Re-price expired before relisting', ctlSw('repriceExpired'), 'Price-check each expired card and relist at today’s price, never below break-even. Off = same price via EA’s Re-list all.') +
-        segSetting('Clear sold items', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]], 'Books the profit and clears sold cards while sniping. When full = only once the list is at 95+ of 100.') +
-        setting('Pack pulls: list if worth at least', ctlNum('packMin'), 'For Hub → List pack pulls. Cheaper cards stay in Unassigned.')) +
-      section('Alerts &amp; display',
-        segSetting('Snipe sound', 'sound', SOUNDS, 'Tap one to hear it. On iPhone, sound starts working after you tap Start.') +
-        setting('Vibrate on snipe', ctlSw('vibrate'), 'Haptic tick on iPhone (iOS 18), vibration on Android.') +
-        setting('Price tags on cards', ctlSw('badges'), 'Shows EA’s AVG value under every card: Club, transfer list, market.') +
-        '<button class="fs-more" id="fs-test">🎉 Test the snipe celebration</button>') +
-      section('Help &amp; data',
+      fold('❓ Help &amp; data',
         '<div class="fs-mini"><button id="fs-diag">Copy diagnostics</button><button id="fs-clearsess">Clear sessions</button><button id="fs-reset2">Reset all-time</button></div>' +
-        '<div class="ds" style="margin-top:8px">Diagnostics contain no password or login data. Reset keeps the record of EA’s last captcha / 429 for the safety assistant.</div><pre id="fs-log"></pre>');
+        '<div class="ds" style="margin-top:8px">Diagnostics contain no password or login data.</div><pre id="fs-log"></pre>');
   }
 
   // Hub, top to bottom: profit + activity cards, safety assistant, trades (bought / sold), then
@@ -191,11 +193,32 @@
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
       '<div class="fs-hubbtns">' +
+        '<button class="fs-hb" id="fs-h-bulk"><b>📋 List many at one price</b><span>pick a player on your transfer list · one price for all</span></button>' +
         '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
         '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
         '<button class="fs-hb" id="fs-h-packs"><b>📦 List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
       '</div>' +
-      '<div class="fs-sect-h" style="margin-top:16px">Sessions</div><div id="fs-h-sessions"></div>';
+      fold('Sessions', '<div id="fs-h-sessions"></div>');
+  }
+  function bulkView() {
+    var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>List many at one price</b></div>';
+    if (bulk.loading) return h + '<div class="fs-empty">Reading your transfer list…</div>';
+    if (!bulk.sel) {
+      if (!bulk.groups) return h + '<div class="fs-empty">' + esc(bulk.err || '…') + '</div>';
+      return h + '<div class="ds" style="margin:2px 4px 10px">Cards on your transfer list that are not listed (or expired), grouped by player. Pick one.</div>' +
+        (bulk.groups.length ? bulk.groups.map(function (g, i) {
+          return '<button class="fs-bkg" data-bk="' + i + '"><span class="nm">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '</span><span class="ct"><b>' + g.count + '</b> waiting' + (g.expired ? ' · ' + g.expired + ' expired' : '') + '</span></button>';
+        }).join('') : '<div class="fs-empty">Nothing waiting: every card on your transfer list is listed or sold.</div>');
+    }
+    var g = bulk.sel, dur = bulk.dur || cfg.listDur || 3600;
+    var inp = function (id, val, ph) { return '<input class="fs-num" id="' + id + '" type="text" inputmode="numeric" value="' + esc(val == null ? '' : String(val)) + '" placeholder="' + ph + '">'; };
+    return h + '<div class="fs-card fs-bk-card"><div class="fs-bk-sel">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '<span>' + g.count + ' waiting</span></div>' +
+        setting('Buy Now price', inp('fs-bk-price', bulk.price || '', 'e.g. 25000'), bulk.price && Number(bulk.price) === lastPriceOf(g.def) ? 'Your last price check for this card.' : 'Every card gets this price.') +
+        setting('Start price', inp('fs-bk-start', bulk.start, 'auto'), 'Empty = one price step below Buy Now.') +
+        setting('How many', inp('fs-bk-n', bulk.n, String(g.count)), 'Up to ' + g.count + '.') +
+        '<div class="fs-set"><div class="nm">List for</div><div class="fs-segw">' + LIST_DURS.map(function (o) { return '<button class="fs-sg' + (o[1] === dur ? ' on' : '') + '" data-bkdur="' + o[1] + '">' + o[0] + '</button>'; }).join('') + '</div></div>' +
+        (bulk.err ? '<div class="fs-bk-err">' + esc(bulk.err) + '</div>' : '') +
+      '</div><button class="fs-btn fs-go" id="fs-bk-go">📋 List them</button><button class="fs-more" id="fs-bk-other">Pick another player</button>';
   }
   function sessionsHTML() {
     if (!sessions.length) return '<div class="fs-empty" style="padding:14px 10px">No sessions yet.</div>';
@@ -360,6 +383,8 @@
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } if (sw === 'wallRun' || sw === 'petals' || sw === 'mascot') applyLook(); save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } if (seg === 'theme' || seg === 'mascotSize') applyLook(); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
+      var bk = g('data-bk'); if (bk != null) { pickBulk(Number(bk)); return; }
+      var bd = g('data-bkdur'); if (bd != null) { saveBulkInputs(); bulk.dur = Number(bd); rebuildView(); return; }
       var ld = g('data-load'); if (ld != null) { loadFilter(Number(ld)); return; }
       var dl = g('data-del'); if (dl != null) { deleteFilter(Number(dl)); return; }
       switch (tg.id) {
@@ -376,6 +401,10 @@
         case 'fs-clearsess': if (window.confirm('Clear the session history?')) { sessions = []; lsSet(SESS_KEY, sessions); redrawTab(); } break;
         case 'fs-reset2': if (window.confirm('Reset all-time stats and session history? This can’t be undone.')) { resetLife(); redrawTab(); } break;
         case 'fs-h-refresh': hubRefreshButton(); break;
+        case 'fs-h-bulk': openBulk(); break;
+        case 'fs-bk-back': tab = 'hub'; rebuildView(); break;
+        case 'fs-bk-other': saveBulkInputs(); bulk.sel = null; bulk.err = ''; rebuildView(); break;
+        case 'fs-bk-go': saveBulkInputs(); startBulk(); break;
         case 'fs-h-more': hubShowAll = !hubShowAll; render(); break;
         case 'fs-h-clear': hubClearButton(); break;
         case 'fs-h-exp': if (running) stopAll(); else startJob('expired'); break;
@@ -395,7 +424,7 @@
       if (running && !lockHidden) {
         lock.classList.add('show'); panel.classList.remove('open'); if (fb) fb.style.display = 'none';
         if ($('fs-l-act')) $('fs-l-act').textContent = phase === 'break' ? 'On a break…' : (activity || 'Checking price…');
-        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + (cfg.sellPrice > 0 ? ' · sell ' + fmt(listPrice()) : '') + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
+        if ($('fs-l-sub')) $('fs-l-sub').textContent = mode === 'job' ? 'Hub job running — tap Stop any time, finished cards stay listed.' : keepMode() ? 'Buy ≤ ' + fmt(market.snipe) + (keepMinNow() > 0 ? ' · min ' + fmt(keepMinNow()) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list') + ' · no price check' : market.snipe ? ('Price ' + fmt(market.price) + (cfg.sellPrice > 0 ? ' · sell ' + fmt(listPrice()) : '') + ' · snipe ≤ ' + fmt(market.snipe) + ' · step ' + fmt(stepFor(market.price)) + ' · list ' + durLabel(cfg.listDur)) : 'Screen locked so you don’t swipe the web app while it runs. Hide to reach the controls.';
         if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(listPrice(), market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
@@ -416,7 +445,7 @@
     var body = $('fs-body');
     if (body.getAttribute('data-tab') !== tab) {
       body.setAttribute('data-tab', tab);
-      body.innerHTML = tab === 'hub' ? hubView() : tab === 'market' ? marketView() : tab === 'settings' ? settingsView() : sniperView();
+      body.innerHTML = tab === 'bulk' ? bulkView() : tab === 'hub' ? hubView() : tab === 'market' ? marketView() : tab === 'settings' ? settingsView() : sniperView();
       fillFeeds(); if ($('fs-log')) $('fs-log').textContent = logLines.join('\n');
       if (tab === 'hub' && !hub.at && !running) hubRefreshButton();
     }
@@ -424,6 +453,7 @@
     // switches / segments reflect cfg in whichever view is open
     var sws = panel.querySelectorAll('[data-sw]'); for (i = 0; i < sws.length; i++) sws[i].className = 'fs-sw' + (cfg[sws[i].getAttribute('data-sw')] ? ' on' : '');
     var segs = panel.querySelectorAll('[data-seg]'); for (i = 0; i < segs.length; i++) segs[i].className = 'fs-sg' + (Number(segs[i].getAttribute('data-val')) === cfg[segs[i].getAttribute('data-seg')] ? ' on' : '');
+    if (tab === 'bulk') return;
     if (tab === 'hub') { renderHub($); var sl = $('fs-h-sessions'), shh = sessionsHTML(); if (sl && sl.__html !== shh) { sl.__html = shh; sl.innerHTML = shh; } return; }
     if (tab === 'market') return renderMarket($);
     if (tab === 'settings') { if ($('fs-wall-st')) $('fs-wall-st').textContent = wallData() ? 'set ✓' : 'none'; if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
@@ -439,9 +469,9 @@
     if ($('fs-t-name')) $('fs-t-name').textContent = haveSearch() ? searchLabel() : 'Search a player in the market';
     if ($('fs-t-mode')) $('fs-t-mode').textContent = keep ? (cfg.afterBuy === 2 ? 'Keep · Unassigned' : 'Keep · Transfer list') : 'List · ' + durLabel(cfg.listDur);
     if ($('fs-t-price')) $('fs-t-price').textContent = keep ? 'no check' : market.price ? fmt(market.price) : (phase === 'checking' ? '…' : '—');
-    if ($('fs-t-snipe')) $('fs-t-snipe').textContent = keep ? (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : 'set price') : market.snipe ? fmt(market.snipe) : '—';
+    if ($('fs-t-snipe')) $('fs-t-snipe').textContent = keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : 'set price') : market.snipe ? fmt(market.snipe) : '—';
     if ($('fs-t-prof')) $('fs-t-prof').textContent = keep ? '—' : pr != null ? signed(pr) : '+' + fmt(cfg.minProfit);
-    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? ('your price' + (cfg.keepMin > 0 ? ' · min ' + fmt(cfg.keepMin) : '') + ' · change it in Settings') : market.snipe ? ('step ' + fmt(stepFor(market.price)) + (market.fresh ? '' : ' · no fresh listings') + ' · checked ' + ago(market.checkedAt) + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '')) : 'Start checks the market price first, then snipes below it.';
+    if ($('fs-t-sub')) $('fs-t-sub').textContent = keep ? (webMaxBuy() ? 'Max. Buy Now of your web app search' : keepMaxNow() ? 'fallback price from Settings · type a Max. Buy Now in the web app search to use that' : 'type a Max. Buy Now into the web app search') + (keepMinNow() > 0 ? ' · min ' + fmt(keepMinNow()) : '') : market.snipe ? ('step ' + fmt(stepFor(market.price)) + (market.fresh ? '' : ' · no fresh listings') + ' · checked ' + ago(market.checkedAt) + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '')) : 'Start checks the market price first, then snipes below it.';
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
     if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
     if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
@@ -455,7 +485,7 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = running
         ? '■ Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
-        : keep ? '▶ Start<span class="sub">buys at ≤ ' + (cfg.keepMax > 0 ? fmt(floorStep(cfg.keepMax)) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
+        : keep ? '▶ Start<span class="sub">buys at ≤ ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
         : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }

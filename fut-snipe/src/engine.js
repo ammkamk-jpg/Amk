@@ -91,6 +91,12 @@
   // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
   // you set (keepMax, optional keepMin).
   function keepMode() { return (cfg.afterBuy | 0) !== 0; }
+  // Manual mode buys at the "Max. Buy Now" (and from the "Min. Buy Now") you typed into the web
+  // app's own search. The bot's fields in Settings are only a fallback for a search without one.
+  function webCrit() { return capturedPlain || capturedFromUrl || null; }
+  function webMaxBuy() { var c = webCrit(); return c && c.maxBuy > 0 ? Number(c.maxBuy) : 0; }
+  function keepMaxNow() { return webMaxBuy() || (cfg.keepMax | 0); }
+  function keepMinNow() { var c = webCrit(); return c && c.minBuy > 0 ? Number(c.minBuy) : (cfg.keepMin | 0); }
   // Where bought cards get listed: your manual sell price, else the checked market price.
   function listPrice() { return cfg.sellPrice > 0 ? roundStep(cfg.sellPrice) : market.price; }
   // Sell price or target profit changed (also mid-run): move the snipe point with it.
@@ -145,7 +151,7 @@
   // Buy everything at or below the snipe point (any freshness), then relist each one.
   var lastMinBid = 0;
   async function snipeOnce() {
-    var keep = keepMode(), minB = keep ? cfg.keepMin : 0;
+    var keep = keepMode(), minB = keep ? keepMinNow() : 0;
     if (cfg.varyMinBid) lastMinBid = nextMinBid(lastMinBid, market.snipe);
     var r = await search(market.snipe, false, minB, cfg.varyMinBid ? lastMinBid : 0); if (!r) return;
     if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
@@ -196,10 +202,11 @@
     if (flagged != null && flagged < 6 * 3600000 && !window.confirm('EA flagged this account ' + Math.max(1, Math.round(flagged / 60000)) + ' min ago (captcha / 429). Sniping again this soon raises the ban risk.\n\nStart anyway?')) { blockMsg = 'Not started: EA flagged you recently. Wait a few hours.'; render(); return; }
     resolveName();
     if (keepMode()) {
-      if (!(cfg.keepMax > 0)) { blockMsg = 'Transfer list / Unassigned mode: set "Buy at or below" first (no price check in this mode).'; render(); return; }
-      if (cfg.keepMin > cfg.keepMax) { blockMsg = 'Min price is higher than "Buy at or below".'; render(); return; }
-      market.snipe = floorStep(cfg.keepMax); running = true; phase = 'running';
-      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (cfg.keepMin > 0 ? ' and ≥ ' + fmt(cfg.keepMin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
+      var kmax = keepMaxNow(), kmin = keepMinNow();
+      if (!(kmax > 0)) { blockMsg = 'Transfer list / Unassigned mode: type a Max. Buy Now into the web app search, search once, then Start.'; render(); return; }
+      if (kmin > kmax) { blockMsg = 'The Min. Buy Now is higher than the Max. Buy Now.'; render(); return; }
+      market.snipe = floorStep(kmax); running = true; phase = 'running';
+      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (webMaxBuy() ? ' (your web app search)' : ' (fallback from Settings)') + (kmin > 0 ? ' and ≥ ' + fmt(kmin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
       say('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe));
       render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
       return;
