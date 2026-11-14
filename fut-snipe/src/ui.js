@@ -62,8 +62,8 @@
       '<div id="fs-act"></div>' +
       '<div class="fs-run"><div><span>Bought</span><b id="fs-s-buys">0</b></div><div><span>Searches</span><b id="fs-s-sr">0</b></div><div><span>Est. profit</span><b id="fs-s-est">—</b></div><div><span>Coins net</span><b id="fs-s-net">—</b></div></div>' +
       '<div class="fs-feed"></div>' +
-      fold('★ Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">★ Save the current market search</button>', filters.length ? filters.length + ' saved' : '') +
-      '<div id="fs-status"></div><pre id="fs-log"></pre>';
+      fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? filters.length + ' saved' : '') +
+      '<div id="fs-status"></div>';
   }
   function filtersHTML() {
     return filters.length ? filters.map(function (f, i) {
@@ -78,22 +78,22 @@
   function gaugeSVG(v) {
     var pt = function (val, r) { var a = Math.PI * (1 - val / 100); return (100 + r * Math.cos(a)).toFixed(1) + ' ' + (100 - r * Math.sin(a)).toFixed(1); };
     var arc = function (a, b, col) { return '<path d="M ' + pt(a, 80) + ' A 80 80 0 0 1 ' + pt(b, 80) + '" fill="none" stroke="' + col + '" stroke-width="15" stroke-linecap="round"/>'; };
-    var segs = arc(1.5, 23, '#fb7185') + arc(27, 43, '#fb923c') + arc(47, 58, '#fbbf24') + arc(62, 98.5, '#34d399');
+    var segs = arc(1.5, 23, '#ff453a') + arc(27, 43, '#ff9f0a') + arc(47, 58, '#ffd60a') + arc(62, 98.5, '#30d158');
     if (v == null) return '<g opacity=".3">' + segs + '</g>';
     var p = pt(v, 80).split(' ');
-    return segs + '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="11" fill="#fff" stroke="#06080d" stroke-width="4"/>';
+    return segs + '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="11" fill="#fff" stroke="#000" stroke-width="4"/>';
   }
   function miniSpark(pts) {
     if (pts.length < 2) return '';
     var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts), span = hi - lo || 1, up = pts[pts.length - 1] >= pts[0];
-    return '<svg class="msp" viewBox="0 0 60 20" preserveAspectRatio="none"><polyline fill="none" stroke="' + (up ? '#34d399' : '#fb7185') + '" stroke-width="2" vector-effect="non-scaling-stroke" points="' +
+    return '<svg class="msp" viewBox="0 0 60 20" preserveAspectRatio="none"><polyline fill="none" stroke="' + (up ? '#30d158' : '#ff453a') + '" stroke-width="2" vector-effect="non-scaling-stroke" points="' +
       pts.map(function (v, i) { return (i * 60 / (pts.length - 1)).toFixed(1) + ',' + (18 - (v - lo) / span * 16).toFixed(1); }).join(' ') + '"/></svg>';
   }
   function marketWord(m) { return !m ? 'not enough checks yet' : m.index >= 60 ? 'prices rising' : m.index <= 40 ? 'prices falling' : 'prices steady'; }
   function marketView() {
     return '<div class="fs-mkt"><svg viewBox="0 0 200 118" id="fs-m-gauge"></svg><div class="mv"><b id="fs-m-idx">—</b><span id="fs-m-lbl"></span></div></div>' +
       '<div class="ds" style="text-align:center;margin:0 6px 14px">Built from the bot’s own price checks in the last 24 h (only cards checked twice or more count). 50 = flat · higher = your cards are getting dearer · lower = cheaper.</div>' +
-      '<button class="fs-more" id="fs-to-scan">📷 Prices → Kartenscan</button>' +
+      '<button class="fs-more" id="fs-to-scan">Send prices to Kartenscan</button>' +
       '<div class="fs-sect-h">Cards checked (24 h)</div><div id="fs-m-list"></div>';
   }
   // Hands the bot's latest checked price per player to the Kartenscan app (it lives on another site,
@@ -127,45 +127,31 @@
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
         segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2]], '<span id="fs-speedhint">' + speedHint() + '</span>')) +
-      fold('🛡 Safety stops',
+      fold('Safety stops',
         setting('Too many results stop (10+)', ctlSw('tooManyStop'), 'Manual price: 10+ cards at your price = probably a typo in the price. Stops before buying.') +
         setting('Price range stop', ctlSw('rangeStop'), 'Never lists outside EA\u2019s allowed price range.') +
         setting('Keep special versions', ctlSw('keepSpecials'), 'A TOTW/special caught by a player search is kept, not sold at the normal price.') +
         setting('Session buy cap', ctlNum('sessionBuyCap'), '') +
         setting('Daily buy cap', ctlNum('dailyBuyCap'), '') +
         setting('Run minutes', ctlNum('runMinutes'), '0 = no limit.'), 'on') +
-      fold('📋 Transfer list',
+      fold('Transfer list',
         setting('Relist expired cards', ctlSw('relistExpired'), 'While sniping.') +
         setting('Re-price expired first', ctlSw('repriceExpired'), 'Today\u2019s price, never below break-even. Off = same price.') +
         segSetting('Clear sold items', 'clearSold', [['Off', 0], ['When full', 1], ['Always', 2]], '') +
         setting('Pack pulls: list if worth at least', ctlNum('packMin'), '')) +
-      fold('⚙️ Fine-tuning',
+      fold('Fine-tuning',
         rangeSetting('Re-check price every ~', 'reprobeEvery', 30, 120, 10, ' searches', '') +
         setting('Vary min bid', ctlSw('varyMinBid'), 'Fresh results on every search.') +
         rangeSetting('Break every ~', 'breakEvery', 20, 120, 5, ' searches', '') +
         rangeSetting('Break length', 'breakSec', 15, 300, 5, 's', '') +
         '<div id="fs-keep">' + setting('Fallback buy price', ctlNum('keepMax'), 'Only used when your web app search has no Max. Buy Now.') +
           setting('Fallback min price', ctlNum('keepMin'), 'Only used when your web app search has no Min. Buy Now. 0 = off.') + '</div>') +
-      fold('🔔 Alerts',
+      fold('Alerts',
         segSetting('Snipe sound', 'sound', SOUNDS, 'Tap one to hear it.') +
         setting('Vibrate on snipe', ctlSw('vibrate'), '') +
         setting('Price tags on cards', ctlSw('badges'), 'EA\u2019s AVG value under every card.') +
-        '<button class="fs-more" id="fs-test">🎉 Test the snipe celebration</button>') +
-      fold('🎨 Look',
-        segSetting('Theme', 'theme', THEMES.map(function (t, i) { return [t.name, i]; }), 'Sakura = pink anime style with falling cherry blossoms. Neon = pink / cyan.') +
-        '<div class="fs-set"><div class="top"><div class="nm">Wallpaper</div><span class="sv" id="fs-wall-st"></span></div>' +
-          '<div class="fs-wallrow"><button class="pick" id="fs-wall-pick">🖼 Choose a picture</button><button id="fs-wall-rm">Remove</button></div>' +
-          '<input type="file" accept="image/*" id="fs-wall-file" style="display:none">' +
-          '<div class="ds">Any picture from your phone, behind the bot and the running screen. Panels turn to frosted glass so text stays readable.</div></div>' +
-        rangeSetting('Wallpaper dim', 'wallDim', 20, 85, 5, '%', 'Darker = easier to read.') +
-        rangeSetting('Wallpaper blur', 'wallBlur', 0, 20, 1, 'px', '') +
-        setting('Wallpaper on the running screen', ctlSw('wallRun'), '') +
-        (setting('Mascot', ctlSw('mascot'), mascotPack() ? 'She idles on the running screen, cheers \u201cuwuuu~\u201d on every snipe and pouts when the bot stops.' : 'Install the \u201cTangaTolga Mascot\u201d pack (a second script, once) to see her: open its link in Safari \u2192 \u1d00A \u2192 Userscripts \u2192 Install, then reload.') +
-          segSetting('Mascot size', 'mascotSize', MASCOT_SIZES, '') +
-          setting('Mascot voice', ctlSw('mascotVoice'), 'On iPhone, sound starts working after you tap Start (or the test button).') +
-          '<button class="fs-more" id="fs-mascot-test">💖 Test her</button>') +
-        setting('Falling petals', ctlSw('petals'), 'Cherry blossoms drifting in the background, in the theme\u2019s colours.')) +
-      fold('❓ Help &amp; data',
+        '<button class="fs-more" id="fs-test">Test the purchase banner</button>') +
+      fold('Help &amp; data',
         '<div class="fs-mini"><button id="fs-diag">Copy diagnostics</button><button id="fs-clearsess">Clear sessions</button><button id="fs-reset2">Reset all-time</button></div>' +
         '<div class="ds" style="margin-top:8px">Diagnostics contain no password or login data.</div><pre id="fs-log"></pre>');
   }
@@ -176,9 +162,9 @@
   function hubView() {
     return '' +
       '<div class="fs-dash">' +
-        '<div class="fs-dc pr"><div class="dh"><span class="di">↗</span>Profit</div><div class="dv" id="fs-h-total">—</div>' +
+        '<div class="fs-dc pr"><div class="dh">Profit</div><div class="dv" id="fs-h-total">—</div>' +
           '<div class="dsub">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
-        '<div class="fs-dc ac"><div class="dh"><span class="di">▮▮</span>Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
+        '<div class="fs-dc ac"><div class="dh">Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
           '<div class="dsub">avg <b id="fs-h-avg">—</b> / card</div></div>' +
       '</div>' +
       '<div class="fs-safe" id="fs-h-safe"><div class="ico" id="fs-h-safe-i">✓</div><div class="tx"><div class="k">Safety assistant</div><div class="t" id="fs-h-safe-t">—</div><div class="h" id="fs-h-safe-h"></div></div><div class="chip" id="fs-h-safe-c"></div></div>' +
@@ -193,10 +179,10 @@
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
       '<div class="fs-hubbtns">' +
-        '<button class="fs-hb" id="fs-h-bulk"><b>📋 List many at one price</b><span>pick a player on your transfer list · one price for all</span></button>' +
-        '<button class="fs-hb" id="fs-h-clear"><b>💰 Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
-        '<button class="fs-hb" id="fs-h-exp"><b>♻️ Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
-        '<button class="fs-hb" id="fs-h-packs"><b>📦 List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-bulk"><b>List many at one price</b><span>pick a player on your transfer list · one price for all</span></button>' +
+        '<button class="fs-hb" id="fs-h-clear"><b>Book &amp; clear sold</b><span id="fs-h-clear-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-exp"><b>Re-price &amp; relist expired</b><span id="fs-h-exp-s">refresh first</span></button>' +
+        '<button class="fs-hb" id="fs-h-packs"><b>List pack pulls</b><span id="fs-h-packs-s">refresh first</span></button>' +
       '</div>' +
       fold('Sessions', '<div id="fs-h-sessions"></div>');
   }
@@ -218,14 +204,14 @@
         setting('How many', inp('fs-bk-n', bulk.n, String(g.count)), 'Up to ' + g.count + '.') +
         '<div class="fs-set"><div class="nm">List for</div><div class="fs-segw">' + LIST_DURS.map(function (o) { return '<button class="fs-sg' + (o[1] === dur ? ' on' : '') + '" data-bkdur="' + o[1] + '">' + o[0] + '</button>'; }).join('') + '</div></div>' +
         (bulk.err ? '<div class="fs-bk-err">' + esc(bulk.err) + '</div>' : '') +
-      '</div><button class="fs-btn fs-go" id="fs-bk-go">📋 List them</button><button class="fs-more" id="fs-bk-other">Pick another player</button>';
+      '</div><button class="fs-btn fs-go" id="fs-bk-go">List</button><button class="fs-more" id="fs-bk-other">Pick another player</button>';
   }
   function sessionsHTML() {
     if (!sessions.length) return '<div class="fs-empty" style="padding:14px 10px">No sessions yet.</div>';
     var maxAbs = Math.max.apply(null, sessions.map(function (s) { return Math.abs(s.net || s.est || 0); }).concat([1]));
     return sessions.slice(0, 15).map(function (s) {
       var val = s.net != null ? s.net : s.est, w = Math.round(Math.abs(val || 0) / maxAbs * 100);
-      return '<div class="fs-sale"><div style="flex:1"><div class="nm">' + signed(val) + ' coins</div><div class="de">' + ago(s.t) + ' · ' + (s.buys || 0) + ' bought · est ' + signed(s.est) + '</div><div class="fs-bar"><i style="width:' + w + '%;background:' + ((val || 0) < 0 ? '#fb7185' : '#34d399') + '"></i></div></div></div>';
+      return '<div class="fs-sale"><div style="flex:1"><div class="nm">' + signed(val) + ' coins</div><div class="de">' + ago(s.t) + ' · ' + (s.buys || 0) + ' bought · est ' + signed(s.est) + '</div><div class="fs-bar"><i style="width:' + w + '%;background:' + ((val || 0) < 0 ? '#ff453a' : '#30d158') + '"></i></div></div></div>';
     }).join('');
   }
   function initials(name) { var p = String(name || '?').replace(/[^\p{L}\s]/gu, '').trim().split(/\s+/); return ((p[0] || '?').charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase(); }
@@ -239,8 +225,7 @@
     if (pts.length < 2) return '';
     var lo = Math.min.apply(null, pts.concat([0])), hi = Math.max.apply(null, pts.concat([1])), span = hi - lo || 1;
     var xy = pts.map(function (v, i) { return (i * 100 / (pts.length - 1)).toFixed(1) + ',' + (30 - (v - lo) / span * 26).toFixed(1); });
-    return '<defs><linearGradient id="fsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--tt-a1);stop-opacity:.45"/><stop offset="1" style="stop-color:var(--tt-a1);stop-opacity:0"/></linearGradient></defs>' +
-      '<polygon fill="url(#fsg)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" style="stroke:var(--tt-a1)" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
+    return '<polygon fill="rgba(10,132,255,.14)" points="0,32 ' + xy.join(' ') + ' 100,32"/><polyline fill="none" stroke="#0a84ff" stroke-width="1.6" vector-effect="non-scaling-stroke" points="' + xy.join(' ') + '"/>';
   }
   function renderHub($) {
     var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
@@ -340,22 +325,22 @@
   function buildUI() {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     var el = document.createElement('div'); el.id = 'fs-panel';
-    el.innerHTML = lookLayers() +
-      '<div id="fs-head"><div><span class="t">TangaTolga</span><span class="t2">SNIPER</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
+    el.innerHTML =
+      '<div id="fs-head"><div><span class="t">Sniper</span><span class="v">v' + VERSION + '</span></div><div style="display:flex;align-items:center"><span class="coins" id="fs-coins">—</span><button id="fs-min" title="Close">✕</button></div></div>' +
       '<div id="fs-tiles">' +
-        '<div class="fs-tile" data-tab="snipe"><div class="ti" id="fs-ti-run">▶</div><div class="tl">Sniper</div></div>' +
-        '<div class="fs-tile" data-tab="hub"><div class="ti">▦</div><div class="tl">My Hub</div></div>' +
-        '<div class="fs-tile" data-tab="market"><div class="tg"><svg viewBox="0 0 200 118" id="fs-ti-gauge"></svg><b id="fs-ti-idx">—</b></div><div class="tl">Market</div></div>' +
-        '<div class="fs-tile" data-tab="settings"><div class="ti">⚙︎</div><div class="tl">Settings</div></div>' +
+        '<div class="fs-tile" data-tab="snipe"><span class="tl">Sniper</span><span class="ti" id="fs-ti-run"></span></div>' +
+        '<div class="fs-tile" data-tab="hub"><span class="tl">Hub</span></div>' +
+        '<div class="fs-tile" data-tab="market"><span class="tl">Market</span></div>' +
+        '<div class="fs-tile" data-tab="settings"><span class="tl">Settings</span></div>' +
       '</div><div id="fs-body"></div>';
     document.body.appendChild(el);
-    var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '⚡<span class="dot"></span>';
+    var fab = document.createElement('div'); fab.id = 'fs-fab'; fab.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 2 4.5 13.6h6.3L9.6 22l9-11.6h-6.3z"/></svg><span class="dot"></span>';
     fab.onclick = function () { if (Date.now() - fabDraggedAt < 400) return; el.classList.add('open'); fab.style.display = 'none'; render(); };
     document.body.appendChild(fab);
     makeFabDraggable(fab);
 
     var lock = document.createElement('div'); lock.id = 'fs-lock';
-    lock.innerHTML = lookLayers() + mascotIdleHTML() + '<div class="lbig">TangaTolga <b>hunting</b></div>' +
+    lock.innerHTML = '<div class="lspin"></div><div class="lbig">Running</div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
       '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
@@ -367,12 +352,10 @@
     lock.addEventListener('touchmove', function (ev) { if (!(ev.target.closest && ev.target.closest('.fs-feed'))) ev.preventDefault(); }, { passive: false });
     lock.querySelector('#fs-lstop').onclick = function () { stopAll(); };
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
-    applyLook();
 
     // live label while dragging a slider
-    el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); if (k === 'wallDim' || k === 'wallBlur') applyLook(); });
+    el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) {
-      if (e.target.id === 'fs-wall-file') { pickWallpaper(e.target.files && e.target.files[0]); e.target.value = ''; return; }
       var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
     el.addEventListener('click', function (e) {
       // closest(): a tap on the subtitle <span> inside a button still counts as that button.
@@ -380,8 +363,8 @@
       if (!tg || !el.contains(tg)) return;
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
-      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } if (sw === 'wallRun' || sw === 'petals' || sw === 'mascot') applyLook(); save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } if (seg === 'theme' || seg === 'mascotSize') applyLook(); save(); render(); return; }
+      var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var bk = g('data-bk'); if (bk != null) { pickBulk(Number(bk)); return; }
       var bd = g('data-bkdur'); if (bd != null) { saveBulkInputs(); bulk.dur = Number(bd); rebuildView(); return; }
@@ -391,9 +374,6 @@
         case 'fs-start': if (running) stopAll(); else { unlockAudio(); start(); } break;
         case 'fs-sell': askSellPrice(); break;
         case 'fs-to-scan': toKartenscan(); break;
-        case 'fs-wall-pick': var fi = document.getElementById('fs-wall-file'); if (fi) fi.click(); break;
-        case 'fs-wall-rm': removeWallpaper(); break;
-        case 'fs-mascot-test': unlockAudio(); mascotReact('win', 'uwuuu~ 💖', 'Test snipe · +662'); break;
         case 'fs-test': unlockAudio(); celebrate('Test snipe', 13750, 662); break;
         case 'fs-min': el.classList.remove('open'); fab.style.display = ''; break;
         case 'fs-diag': diag(); break;
@@ -440,7 +420,7 @@
     var mi = marketIndex(priceHist, Date.now()), tg = $('fs-ti-gauge'), tgh = gaugeSVG(mi ? mi.index : null);
     if (tg && tg.__h !== tgh) { tg.__h = tgh; tg.innerHTML = tgh; }
     if ($('fs-ti-idx')) $('fs-ti-idx').textContent = mi ? mi.index : '—';
-    if ($('fs-ti-run')) { $('fs-ti-run').textContent = running ? '●' : '▶'; $('fs-ti-run').className = 'ti' + (running ? ' live' : ''); }
+    if ($('fs-ti-run')) $('fs-ti-run').className = 'ti' + (running ? ' live' : '');
     // body (only rebuilt on view change, so inputs stay usable)
     var body = $('fs-body');
     if (body.getAttribute('data-tab') !== tab) {
@@ -456,7 +436,7 @@
     if (tab === 'bulk') return;
     if (tab === 'hub') { renderHub($); var sl = $('fs-h-sessions'), shh = sessionsHTML(); if (sl && sl.__html !== shh) { sl.__html = shh; sl.innerHTML = shh; } return; }
     if (tab === 'market') return renderMarket($);
-    if (tab === 'settings') { if ($('fs-wall-st')) $('fs-wall-st').textContent = wallData() ? 'set ✓' : 'none'; if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
+    if (tab === 'settings') { if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint(); return; }
 
     // Sniper view
     var keep = keepMode(), pr = market.snipe && !keep ? profitAt(listPrice(), market.snipe) : null;
@@ -484,21 +464,19 @@
       // Only touch the DOM when it changes, so a tap is never lost to a re-render.
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = running
-        ? '■ Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
-        : keep ? '▶ Start<span class="sub">buys at ≤ ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
-        : '▶ Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
+        ? 'Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
+        : keep ? 'Start<span class="sub">buys at ≤ ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + ' · ' + (cfg.afterBuy === 2 ? 'leaves them in Unassigned' : 'moves them to your transfer list') + '</span>'
+        : 'Start<span class="sub">checks the price, then snipes for +' + fmt(cfg.minProfit) + '/card and relists (' + durLabel(cfg.listDur) + ')</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
     }
     if ($('fs-status')) {
       $('fs-status').textContent = stopReason ? '■ ' + stopReason : (phase === 'checking' ? 'Checking price…' : phase === 'break' ? 'Taking a short break…' : running ? ('● Sniping ≤ ' + fmt(market.snipe)) : haveServices() ? (haveSearch() ? 'Ready — tap Start' : 'Search a player, or load a saved search') : 'Open the FUT Web App & sign in');
-      $('fs-status').style.color = running ? '#34d399' : stopReason ? '#fb923c' : '#8b95a8';
+      $('fs-status').style.color = running ? '#30d158' : stopReason ? '#ff9f0a' : 'rgba(235,235,245,.6)';
     }
   }
 
   setInterval(function () { if ((tab === 'hub' || tab === 'market') && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
-  var packSeen = false;
   function boot(tries) {
-    if (!packSeen && mascotPack()) { packSeen = true; if (document.getElementById('fs-lock')) applyLook(); } // the pack script may load after the bot
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
     if ((tries || 0) < 180) setTimeout(function () { boot((tries || 0) + 1); }, 1000);

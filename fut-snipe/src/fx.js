@@ -1,7 +1,7 @@
   // ---------- snipe celebration: animation, vibration, sound ----------
   // Sounds are synthesised with WebAudio (no files). iOS only allows audio after a tap, so the
   // audio context is unlocked when you tap Start (or a sound button in settings).
-  var SOUNDS = [['Off', 0], ['Coins', 1], ['Arcade', 2], ['Boom', 3]];
+  var SOUNDS = [['Off', 0], ['Chime', 1], ['Coins', 2], ['Pop', 3]];
   var audioCtx = null;
   function unlockAudio() {
     try {
@@ -27,9 +27,9 @@
     if (!kind || !audioCtx) return;
     try {
       if (audioCtx.state === 'suspended') audioCtx.resume();
-      if (kind === 1) { tone('square', 988, 988, 0, 0.09, 0.12); tone('square', 1319, 1319, 0.08, 0.42, 0.12); tone('triangle', 2637, 2637, 0.16, 0.25, 0.05); }
-      else if (kind === 2) { [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone('square', f, f, i * 0.07, 0.12, 0.09); }); tone('sawtooth', 1047, 2093, 0.36, 0.35, 0.06); }
-      else if (kind === 3) { tone('sine', 150, 38, 0, 0.7, 0.55); noise(0, 0.45, 0.35); tone('triangle', 1568, 1568, 0.12, 0.6, 0.08); tone('triangle', 2093, 2093, 0.22, 0.6, 0.06); }
+      if (kind === 1) { tone('sine', 1319, 1319, 0, 0.5, 0.18); tone('sine', 1976, 1976, 0.09, 0.6, 0.12); }
+      else if (kind === 2) { tone('square', 988, 988, 0, 0.09, 0.08); tone('square', 1319, 1319, 0.08, 0.38, 0.08); }
+      else if (kind === 3) { tone('sine', 660, 1320, 0, 0.12, 0.2); }
     } catch (e) {}
   }
 
@@ -47,43 +47,17 @@
     } catch (e) {}
   }
 
-  // The over-the-top part: flash, shockwaves, "SNIPED!", a burst of coins + confetti, screen shake.
+  // A purchase banner like an iOS notification: green tick, player, price and profit.
   function celebrate(name, price, profit) {
-    mascotReact('win', 'uwuuu~ 💖', name + (profit != null ? ' · +' + fmt(profit) : ' · ' + fmt(price)));
     if (cfg.vibrate) vibrate();
     playSound(cfg.sound | 0);
     try {
-      var old = document.getElementById('fs-fx'); if (old) old.parentNode.removeChild(old);
-      var fx = document.createElement('div'); fx.id = 'fs-fx';
-      fx.innerHTML = '<div class="fx-flash"></div><div class="fx-ring"></div><div class="fx-ring r2"></div><div class="fx-ring r3"></div><canvas></canvas>' +
-        '<div class="fx-txt"><div class="fx-big">SNIPED!</div><div class="fx-name">' + esc(name) + '</div><div class="fx-meta">' + fmt(price) + (profit != null ? ' <span>+' + fmt(profit) + '</span>' : '') + '</div></div>';
-      document.body.appendChild(fx);
-      var lock = document.getElementById('fs-lock'); if (lock) { lock.classList.remove('shake'); void lock.offsetWidth; lock.classList.add('shake'); }
-      burst(fx.querySelector('canvas'));
-      setTimeout(function () { fx.classList.add('out'); }, 2300);
-      setTimeout(function () { if (fx.parentNode) fx.parentNode.removeChild(fx); }, 2900);
+      var old = document.getElementById('fs-toast'); if (old && old.parentNode) old.parentNode.removeChild(old);
+      var t = document.createElement('div'); t.id = 'fs-toast';
+      t.innerHTML = '<div class="ic">✓</div><div class="tx"><b>Bought ' + esc(name) + '</b><span>' + fmt(price) + ' coins' + (profit != null ? ' · +' + fmt(profit) + ' profit' : '') + '</span></div>';
+      document.body.appendChild(t);
+      requestAnimationFrame(function () { requestAnimationFrame(function () { t.classList.add('in'); }); });
+      setTimeout(function () { t.classList.remove('in'); }, 2600);
+      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 3200);
     } catch (e) {}
-  }
-  function burst(cv) {
-    var w = window.innerWidth, h = window.innerHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
-    cv.width = w * dpr; cv.height = h * dpr; var c = cv.getContext('2d'); c.scale(dpr, dpr);
-    var cols = ['#22d3ee', '#a78bfa', '#34d399', '#f472b6', '#fde68a'], parts = [];
-    for (var i = 0; i < 150; i++) {
-      var a = Math.random() * Math.PI * 2, sp = 4 + Math.random() * 11, coin = i % 3 === 0;
-      parts.push({ x: w / 2, y: h * 0.42, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 5, r: coin ? 5 + Math.random() * 4 : 3 + Math.random() * 4,
-        rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, coin: coin, col: cols[i % cols.length] });
-    }
-    var t0 = Date.now();
-    (function frame() {
-      var t = Date.now() - t0; if (t > 2700) return;
-      c.clearRect(0, 0, w, h);
-      parts.forEach(function (p) {
-        p.vy += 0.32; p.vx *= 0.985; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-        c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.globalAlpha = Math.max(0, 1 - t / 2700);
-        if (p.coin) { c.scale(Math.abs(Math.cos(p.rot * 2)) + 0.15, 1); c.fillStyle = '#fbbf24'; c.beginPath(); c.arc(0, 0, p.r, 0, 7); c.fill(); c.fillStyle = '#fde68a'; c.beginPath(); c.arc(-p.r * 0.25, -p.r * 0.25, p.r * 0.45, 0, 7); c.fill(); }
-        else { c.fillStyle = p.col; c.fillRect(-p.r, -p.r / 2.5, p.r * 2, p.r / 1.25); }
-        c.restore();
-      });
-      requestAnimationFrame(frame);
-    })();
   }

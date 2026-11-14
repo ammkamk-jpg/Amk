@@ -80,8 +80,8 @@
     var done = 0;
     for (var i = 0; i < expired.length && i < max && running; i++) {
       var it = expired[i], old = salePriceOf(it), name = nameOf(it) || 'Card';
-      setActivity('♻️ Re-pricing expired ' + name + '…');
-      feed('♻️ Expired ' + name + ' (was ' + fmt(old) + '): re-pricing', 'check');
+      setActivity('Re-pricing expired ' + name + '…');
+      feed('Expired ' + name + ' (was ' + fmt(old) + '): re-pricing', 'check');
       var pick = isPlayer(it) ? await withCard(it, function () { return findPrice(old); }) : null;
       if (!running) break;
       var b = ledger.buys[String(it.id)], cost = b && !b.pack ? b.buy : null;
@@ -161,10 +161,10 @@
     var todo = g.items.slice(0, n), done = 0, fails = 0;
     for (var i = 0; i < todo.length && running; i++) {
       var it = todo[i];
-      setActivity('📋 Listing ' + (i + 1) + ' of ' + todo.length + ': ' + g.name + ' at ' + fmt(p.buy));
+      setActivity('Listing ' + (i + 1) + ' of ' + todo.length + ': ' + g.name + ' at ' + fmt(p.buy));
       if (i === 0 && !(await rangeOk(it, p.buy))) return 'price is outside EA\u2019s range for this card - nothing listed';
       await sleep(rand(1100, 2600)); if (!running) break;
-      if (await listItem(it, p.start, p.buy, dur)) { done++; fails = 0; noteList(it.id, p.buy); if (done % 10 === 0) feed('📋 ' + done + ' of ' + todo.length + ' listed', 'list'); }
+      if (await listItem(it, p.start, p.buy, dur)) { done++; fails = 0; noteList(it.id, p.buy); if (done % 10 === 0) feed(done + ' of ' + todo.length + ' listed', 'list'); }
       else if (++fails >= 2) { feed('Listing failed twice in a row - stopped. EA busy or a captcha? Check the web app.', 'stop'); break; }
       else feed('Listing one ' + g.name + ' failed - trying the next', 'miss');
     }
@@ -179,7 +179,7 @@
     if (!canStart()) return;
     tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
     running = true; mode = 'job'; phase = 'job';
-    feed('📋 Listing ' + n + ' × ' + g.name + ' at ' + fmt(p.buy) + ' (start ' + fmt(p.start) + ', ' + durLabel(dur) + ')', 'check'); rebuildView();
+    feed('Listing ' + n + ' × ' + g.name + ' at ' + fmt(p.buy) + ' (start ' + fmt(p.start) + ', ' + durLabel(dur) + ')', 'check'); rebuildView();
     runBulk(g, p, n, dur).then(function (msg) { if (running) requestStop('Done: ' + msg); refreshHub(true); }).catch(function (e) { requestStop('bulk list error: ' + e); });
   }
 

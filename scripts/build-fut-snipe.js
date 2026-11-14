@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
-const VERSION = "4.6.0";
+const VERSION = "5.0.0";
 const raw = "https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/fut-snipe.user.js";
 
 const header = `// ==UserScript==
@@ -35,46 +35,9 @@ const header = `// ==UserScript==
 `;
 
 // Order matters only for code that runs at load time (settings, XHR hook, boot is last).
-const parts = ["pricing", "store", "state", "ea", "engine", "hub", "filters", "badges", "fx", "mascot", "styles", "look", "ui"];
+const parts = ["pricing", "store", "state", "ea", "engine", "hub", "filters", "badges", "fx", "styles", "ui"];
 
 const body = parts.map((p) => read(`fut-snipe/src/${p}.js`).replace(/\s+$/, "")).join("\n\n");
-
-// The mascot's animations + voice clips go into a separate "pack" script, installed once, so bot
-// updates stay small. It only sets window.__ttMascot; the bot picks it up (see mascot.js).
-const assetDir = path.join(root, "fut-snipe/assets/mascot");
-if (fs.existsSync(path.join(assetDir, "idle.webp"))) {
-  const b64 = (f) => fs.readFileSync(path.join(assetDir, f)).toString("base64");
-  // Short lines: Safari can't display a multi-megabyte single line, and then the Userscripts
-  // "Install" button never appears. The pieces are joined back together when the pack runs.
-  const lines = (str) => "[\n" + (str.match(/.{1,1000}/g) || [""]).map((c) => JSON.stringify(c)).join(",\n") + "\n].join(\"\")";
-  const PACK_VERSION = "2.2.0";
-  const packRaw = "https://raw.githubusercontent.com/ammkamk-jpg/Amk/fut-snipe-one-button/tangatolga-mascot.user.js";
-  const pack = `// ==UserScript==
-// @name         TangaTolga Mascot
-// @namespace    local.tangatolga.mascot
-// @version      ${PACK_VERSION}
-// @description  The animated mascot for TangaTolga Sniper (install both). Only provides her animations and voice.
-// @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
-// @match        *://www.ea.com/*fifa/ultimate-team/web-app/*
-// @run-at       document-start
-// @inject-into  page
-// @grant        none
-// @noframes
-// @downloadURL  ${packRaw}
-// @updateURL    ${packRaw}
-// ==/UserScript==
-// GENERATED FILE: from fut-snipe/assets/mascot/ by \`npm run build:fut-snipe\`.
-window.__ttMascot = {
-  idle: ${lines("data:image/webp;base64," + b64("idle.webp"))},
-  win: ${lines("data:image/webp;base64," + b64("win.webp"))},
-  sad: ${lines("data:image/webp;base64," + b64("sad.webp"))},
-  winMp3: ${lines(b64("win.mp3"))},
-  sadMp3: ${lines(fs.existsSync(path.join(assetDir, "sad.mp3")) ? b64("sad.mp3") : "")}
-};
-`;
-  fs.writeFileSync(path.join(root, "tangatolga-mascot.user.js"), pack);
-  console.log(`TangaTolga Mascot pack -> tangatolga-mascot.user.js v${PACK_VERSION} (${(pack.length / 1048576).toFixed(1)} MB)`);
-}
 
 const out = `${header}
 (function () {
