@@ -71,3 +71,9 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 - Processing (ffmpeg, available in the container): chromakey the green -> transparent animated WebP (~360 px, ~15 fps, a few hundred KB each) + win audio clip; embed as data URLs (EA's CSP may block external media; img-src data: is what the wallpaper uses).
 - In the bot: new mascot.js; idle loop in a corner of the running screen (and optionally the panel); on snipe swap to the win animation + audio + speech bubble ("uwuuu~ 💖", player + profit) alongside celebrate(); sad clip on stop/failed buy. Settings -> Look: Mascot on/off, size.
 - Never ask the user to paste the API key in chat.
+
+### 5.2.0 – speed −/+, Auto/Custom, start time
+- Price-check searches pace at 0.6× the search gap (was 1.35×).
+- Speed −/+ (Sniper row and Settings): 0.2 s per tap, Custom speed (3), floor 0.4 s (`stepGap`).
+- Run & breaks: Auto/Custom for runtime, stop limit (Auto 15), out of coins (Auto = stop), breaks (Auto ~30 searches / ~90 s; Custom 0 = off). Daily cap stays always on.
+- Start row: Now or a time (HH:MM, session only, `startDelayMs`); Stop/Cancel while waiting.

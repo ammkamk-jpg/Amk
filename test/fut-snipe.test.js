@@ -262,3 +262,19 @@ test("bulk list: one valid Buy Now and start price", () => {
   assert.ok(P.bulkPrices(0).err); assert.ok(P.bulkPrices(100).err);
   assert.equal(P.bulkPrices(200, "").start, 150);
 });
+
+test("speed +/-: 0.2 s per tap, floor 0.4 s, window kept", () => {
+  assert.deepEqual(P.stepGap(600, 1200, -200), { min: 400, max: 1000 });
+  assert.deepEqual(P.stepGap(400, 1000, -200), { min: 400, max: 1000 }, "never under 0.4 s");
+  assert.deepEqual(P.stepGap(3500, 5500, 200), { min: 3700, max: 5700 });
+  assert.deepEqual(P.stepGap(500, 600, 0), { min: 500, max: 800 }, "window at least 0.3 s");
+});
+
+test("scheduled start: next time the clock shows HH:MM", () => {
+  const now = new Date(2026, 10, 14, 22, 0, 0);
+  assert.equal(P.startDelayMs("22:30", now), 30 * 60000);
+  assert.equal(P.startDelayMs("21:00", now), 23 * 3600000, "already past: tomorrow");
+  assert.equal(P.startDelayMs("7.05", now), (9 * 60 + 5) * 60000);
+  assert.equal(P.startDelayMs("25:00", now), null);
+  assert.equal(P.startDelayMs("", now), null);
+});

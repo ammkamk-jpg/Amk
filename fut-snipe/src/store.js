@@ -11,21 +11,40 @@
   function load() { try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch (e) { return Object.assign({}, DEFAULTS); } }
   function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch (e) {} }
   var cfg = load();
+  // Auto/Custom switches (0 = Auto). Old saves with own values start on Custom.
+  var rawCfg = {}; try { rawCfg = JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) {}
+  if (!('cRun' in rawCfg)) cfg.cRun = cfg.runMinutes > 0 ? 1 : 0;
+  if (!('cCap' in rawCfg)) cfg.cCap = cfg.sessionBuyCap !== 15 ? 1 : 0;
+  if (!('cCoins' in rawCfg)) cfg.cCoins = 0;
+  if (!('cBreaks' in rawCfg)) cfg.cBreaks = cfg.breakEvery !== 30 || cfg.breakSec !== 90 ? 1 : 0;
+  // What the run actually uses: Auto = no time limit, stop after 15 buys, stop when out of coins,
+  // a ~90 s break every ~30 searches. Custom = your values (break every 0 = no breaks).
+  function runLimitMin() { return cfg.cRun ? (cfg.runMinutes | 0) : 0; }
+  function buyCapNow() { return cfg.cCap ? Math.max(1, cfg.sessionBuyCap | 0) : 15; }
+  function breakEveryNow() { return cfg.cBreaks ? (cfg.breakEvery | 0) : 30; }
+  function breakSecNow() { return cfg.cBreaks ? cfg.breakSec : 90; }
   if (!(cfg.reprobeEvery >= 30 && cfg.reprobeEvery <= 120)) cfg.reprobeEvery = 50; // old saves had 20
   var oldLook = ['theme', 'wallDim', 'wallBlur', 'wallRun', 'petals', 'mascot', 'mascotSize', 'mascotVoice'].filter(function (k) { return k in cfg; });
   if (oldLook.length) { oldLook.forEach(function (k) { delete cfg[k]; }); save(); } // old look settings
   try { localStorage.removeItem('futSnipe.wall.v1'); } catch (e) {} // old wallpaper (could be large)
   if (cfg.autoClearSold === 0 && cfg.clearSold === 2) { cfg.clearSold = 0; delete cfg.autoClearSold; } // old on/off switch
   // Speed sets only the search/buy cadence (breaks are configured separately).
-  // Random gap between searches: Turbo 0.6-1.2s, Normal 3.5-5.5s, Night 6.5-9.5s (overnight runs).
+  // Random gap between searches: Turbo 0.6-1.2s, Normal 3.5-5.5s, Night 6.5-9.5s (overnight runs),
+  // Custom = your own gap from the -/+ buttons (0.2 s per tap, never under 0.4 s).
   function applySpeed() {
     var s = cfg.speed | 0;
-    if (s === 2) { cfg.gapMinMs = 600; cfg.gapMaxMs = 1200; cfg.buyGapMinMs = 300; cfg.buyGapMaxMs = 700; }
+    if (s === 3) { var cg = stepGap(cfg.gapMinMs, cfg.gapMaxMs, 0); cfg.gapMinMs = cg.min; cfg.gapMaxMs = cg.max; }
+    else if (s === 2) { cfg.gapMinMs = 600; cfg.gapMaxMs = 1200; cfg.buyGapMinMs = 300; cfg.buyGapMaxMs = 700; }
     else if (s === 0) { cfg.gapMinMs = 6500; cfg.gapMaxMs = 9500; cfg.buyGapMinMs = 900; cfg.buyGapMaxMs = 1800; }
     else { cfg.gapMinMs = 3500; cfg.gapMaxMs = 5500; cfg.buyGapMinMs = 500; cfg.buyGapMaxMs = 1100; }
     delete cfg.searchMinMs; delete cfg.searchJitterMs; // old settings
   }
-  function speedHint() { return 'a random ' + (cfg.gapMinMs / 1000) + '-' + (cfg.gapMaxMs / 1000) + 's between searches' + ((cfg.speed | 0) === 0 ? ' · overnight' : ''); }
+  var SPEEDS = ['Night', 'Normal', 'Turbo', 'Custom'];
+  function secs(ms) { return String(Math.round(ms / 100) / 10); }
+  function gapLabel() { return secs(cfg.gapMinMs) + '–' + secs(cfg.gapMaxMs) + 's'; }
+  function speedHint() { return 'a random ' + gapLabel() + ' between searches' + ((cfg.speed | 0) === 0 ? ' · overnight' : '') + '. + = 0.2 s faster, − = 0.2 s slower.'; }
+  // dir +1 = faster (0.2 s shorter gaps), -1 = slower. Turns the speed into Custom.
+  function speedStep(dir) { var g = stepGap(cfg.gapMinMs, cfg.gapMaxMs, dir > 0 ? -200 : 200); cfg.speed = 3; cfg.gapMinMs = g.min; cfg.gapMaxMs = g.max; }
   applySpeed();
 
   function lsGet(k, d) { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(d)); } catch (e) { return d; } }

@@ -10,11 +10,12 @@
 
   async function wait(ms) { for (var x = 0; x < ms && running; x += 250) await sleep(Math.min(250, ms - x)); return running; }
   // Human-like gap between searches (never below the speed setting, never exactly the same,
-  // sometimes a longer pause). Price-check searches go ~35% slower: a person reads the results.
+  // sometimes a longer pause). Price-check searches go faster (~0.6x): they're quick look-ups of
+  // a few prices, and the check is done in a handful of searches.
   var tempo = { bias: 0, left: 0 };
   function pace(slow) {
     if (--tempo.left <= 0) tempo = nextMood();
-    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 1.35 : 1)));
+    return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 0.6 : 1)));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
   async function search(maxBuy, slow, minBuy, minBid) {
@@ -27,9 +28,9 @@
   }
   // Long breaks every ~breakEvery searches (the exact number changes every time).
   async function maybeBreak() {
-    if (!running || stats.sinceBreak < nextBreakAt) return;
-    stats.sinceBreak = 0; nextBreakAt = fuzzyCount(cfg.breakEvery, 0.25);
-    var base = Math.max(5, cfg.breakSec) * 1000, br = rand(Math.round(base * 0.8), Math.round(base * 1.2));
+    if (!running || !breakEveryNow() || stats.sinceBreak < nextBreakAt) return;
+    stats.sinceBreak = 0; nextBreakAt = fuzzyCount(breakEveryNow(), 0.25);
+    var base = Math.max(5, breakSecNow()) * 1000, br = rand(Math.round(base * 0.8), Math.round(base * 1.2));
     var back = phase; phase = 'break'; say('On a break (' + Math.round(br / 1000) + 's)…'); feed('Break ' + Math.round(br / 1000) + 's', 'break'); render();
     await wait(br);
     if (running) phase = back; render();
@@ -161,7 +162,7 @@
     var bought = 0;
     for (var j = 0; j < r.items.length && running; j++) {
       var price = r.items[j].p; if (price > market.snipe) break; if (price < minB) continue;
-      var bal = coins(); if (bal != null && price > bal) { feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
+      var bal = coins(); if (bal != null && price > bal) { if (!cfg.cCoins) return requestStop('out of coins (' + fmt(bal) + ' left, card costs ' + fmt(price) + ')'); feed('Not enough coins for ' + fmt(price), 'miss'); continue; }
       var b = await doBuy(r.items[j].it, price); if (!running) return;
       if (b.ok) {
         var it = r.items[j].it, special = !keep && cfg.keepSpecials && isSpecialBuy(defIdOf(it), capturedPlain || capturedFromUrl);
@@ -171,7 +172,7 @@
         feed(cardLabel(it) + ' sniped for ' + fmt(price) + (keep || special ? '' : ' · +' + fmt(e)), 'hit'); celebrate(cardLabel(it), price, keep || special ? null : e); render();
         if (special) await keepSpecial(it, price); else await afterBuy(it);
       } else { lastBuy = (b.err && b.err.msg) || 'failed'; feed(searchLabel() + ' ' + fmt(price) + ' · ' + lastBuy, 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
-      if (stats.buys >= cfg.sessionBuyCap) return;
+      if (stats.buys >= buyCapNow()) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
@@ -179,9 +180,9 @@
 
   async function runLoop() {
     while (running) {
-      if (stats.buys >= cfg.sessionBuyCap) return requestStop('session cap reached (' + cfg.sessionBuyCap + ')');
+      if (stats.buys >= buyCapNow()) return requestStop('stop limit reached (' + buyCapNow() + ' bought)');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
-      if (cfg.runMinutes > 0 && Date.now() - startTs > cfg.runMinutes * 60000) return requestStop('time limit (' + cfg.runMinutes + ' min)');
+      if (runLimitMin() > 0 && Date.now() - startTs > runLimitMin() * 60000) return requestStop('time limit (' + runLimitMin() + ' min)');
       if (!keepMode() && (!market.snipe || stats.sinceCheck >= nextCheckAt)) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
       else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
@@ -195,11 +196,27 @@
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return false; }
     return true;
   }
-  function start() {
+  // Start at a set time: the run waits (Stop cancels), then starts as if you tapped Start then.
+  async function waitForStart() {
+    var ms = startDelayMs(startAt, new Date()); if (ms == null) { startAt = ''; return true; }
+    var end = Date.now() + ms; running = true; phase = 'waiting';
+    feed('Waiting · starts at ' + startAt, 'break');
+    while (running && Date.now() < end) {
+      var left = end - Date.now(), mins = Math.ceil(left / 60000);
+      setActivity('Starts at ' + startAt + ' · in ' + (mins >= 60 ? Math.floor(mins / 60) + ' h ' + (mins % 60) + ' min' : mins + ' min'));
+      render(); await wait(Math.min(20000, left));
+    }
+    if (!running) { startAt = ''; setActivity(''); return false; }
+    running = false; phase = 'idle'; startAt = ''; resetRun(); setActivity('');
+    return true;
+  }
+  async function start() {
     if (!canStart()) return;
     if (!haveSearch()) { blockMsg = 'Search a player in the transfer market (or load a filter), then Start.'; render(); return; }
     var flagged = life.lastBlock ? Date.now() - life.lastBlock : null;
     if (flagged != null && flagged < 6 * 3600000 && !window.confirm('EA flagged this account ' + Math.max(1, Math.round(flagged / 60000)) + ' min ago (captcha / 429). Sniping again this soon raises the ban risk.\n\nStart anyway?')) { blockMsg = 'Not started: EA flagged you recently. Wait a few hours.'; render(); return; }
+    if (startAt && !(await waitForStart())) return;
+    if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     resolveName();
     if (keepMode()) {
       var kmax = keepMaxNow(), kmin = keepMinNow();
