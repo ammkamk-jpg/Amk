@@ -4,7 +4,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -54,7 +54,7 @@
   function dailyCount() { try { var d = JSON.parse(localStorage.getItem('futSnipe.daily') || '{}'); return d.date === today() ? (d.n | 0) : 0; } catch (e) { return 0; } }
   function addDaily(n) { try { localStorage.setItem('futSnipe.daily', JSON.stringify({ date: today(), n: dailyCount() + n })); } catch (e) {} }
   function loadLife() { return lsGet(LIFE_KEY, { bought: 0, spent: 0, est: 0 }); }
-  function saveLife() { lsSet(LIFE_KEY, life); }
+  function saveLife() { lsSet(LIFE_KEY, life); if (typeof saveSearchDays === 'function') saveSearchDays(); }
   var life = loadLife();
 
   // Live Filters (saved search sets) + Stats (session history).
@@ -83,10 +83,14 @@
   function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
 
   // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).
+  // Searches per local day (last 40 days) for the dashboard range. Saved with the lifetime stats.
+  var searchDays = lsGet('futSnipe.searchDays', {}), searchDaysDirty = false;
+  function saveSearchDays() { if (!searchDaysDirty) return; searchDaysDirty = false; var ks = Object.keys(searchDays).sort(); ks.slice(0, Math.max(0, ks.length - 40)).forEach(function (k) { delete searchDays[k]; }); lsSet('futSnipe.searchDays', searchDays); }
   function searchesToday() { var d = lsGet('futSnipe.dailyS', {}); return d.date === today() ? (d.n | 0) : 0; }
   var searchesUnsaved = 0;
   function countSearch() {
     life.searches = (life.searches || 0) + 1;
     var d = lsGet('futSnipe.dailyS', {}); lsSet('futSnipe.dailyS', { date: today(), n: (d.date === today() ? (d.n | 0) : 0) + 1 });
-    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); }
+    var k = dayKey(new Date()); searchDays[k] = (searchDays[k] | 0) + 1; searchDaysDirty = true;
+    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); saveSearchDays(); }
   }

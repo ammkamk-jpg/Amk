@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.2.0
+// @version      5.3.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.2.0';
+  var VERSION = '5.3.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -230,6 +230,16 @@
     return t.getTime() - now.getTime();
   }
 
+  // Dashboard range: 0 today, 1 last 7 days, 2 last 30 days, 3 all time -> start time in ms.
+  var RANGES = ['Today', '7 days', '30 days', 'All'];
+  function rangeStart(r, now) { if ((r | 0) >= 3) return 0; var d = new Date(now.getTime()); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - [0, 6, 29][r | 0]); return d.getTime(); }
+  // Local calendar day 'YYYY-MM-DD' (per-day search counts).
+  function dayKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function sumDays(map, sinceMs) {
+    var sum = 0; Object.keys(map || {}).forEach(function (k) { var p = k.split('-'); if (new Date(+p[0], +p[1] - 1, +p[2]).getTime() >= sinceMs) sum += map[k] | 0; });
+    return sum;
+  }
+
   // Bulk list: cards waiting on the transfer list (not listed, or expired), grouped by exact card
   // version, most copies first. rows: [{def, name, rating, state, tradable, player, it}].
   function bulkGroups(rows) {
@@ -269,7 +279,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays };
   }
 
   // ---------- settings & storage ----------
@@ -278,7 +288,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -328,7 +338,7 @@
   function dailyCount() { try { var d = JSON.parse(localStorage.getItem('futSnipe.daily') || '{}'); return d.date === today() ? (d.n | 0) : 0; } catch (e) { return 0; } }
   function addDaily(n) { try { localStorage.setItem('futSnipe.daily', JSON.stringify({ date: today(), n: dailyCount() + n })); } catch (e) {} }
   function loadLife() { return lsGet(LIFE_KEY, { bought: 0, spent: 0, est: 0 }); }
-  function saveLife() { lsSet(LIFE_KEY, life); }
+  function saveLife() { lsSet(LIFE_KEY, life); if (typeof saveSearchDays === 'function') saveSearchDays(); }
   var life = loadLife();
 
   // Live Filters (saved search sets) + Stats (session history).
@@ -357,12 +367,16 @@
   function noteList(id, price) { var b = id != null && ledger.buys[String(id)]; if (b) { b.list = price; saveLedger(); } }
 
   // Searches per day (for the safety assistant) and when EA last stopped us (captcha / 429).
+  // Searches per local day (last 40 days) for the dashboard range. Saved with the lifetime stats.
+  var searchDays = lsGet('futSnipe.searchDays', {}), searchDaysDirty = false;
+  function saveSearchDays() { if (!searchDaysDirty) return; searchDaysDirty = false; var ks = Object.keys(searchDays).sort(); ks.slice(0, Math.max(0, ks.length - 40)).forEach(function (k) { delete searchDays[k]; }); lsSet('futSnipe.searchDays', searchDays); }
   function searchesToday() { var d = lsGet('futSnipe.dailyS', {}); return d.date === today() ? (d.n | 0) : 0; }
   var searchesUnsaved = 0;
   function countSearch() {
     life.searches = (life.searches || 0) + 1;
     var d = lsGet('futSnipe.dailyS', {}); lsSet('futSnipe.dailyS', { date: today(), n: (d.date === today() ? (d.n | 0) : 0) + 1 });
-    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); }
+    var k = dayKey(new Date()); searchDays[k] = (searchDays[k] | 0) + 1; searchDaysDirty = true;
+    if (++searchesUnsaved >= 10) { searchesUnsaved = 0; saveLife(); saveSearchDays(); }
   }
 
   // ---------- run state (resetRun() clears it on every Start) ----------
@@ -565,6 +579,28 @@
   function isTradable(it) { try { if (typeof it.isTradeable === 'function') return !!it.isTradeable(); } catch (e) {} return it.tradable !== false && !(it.untradeableCount > 0); }
   function isPlayer(it) { try { return it.type === 'player' || (typeof it.isPlayer === 'function' && it.isPlayer()); } catch (e) { return false; } }
   function unassignedItems() { return new Promise(function (res) { try { if (!svc().Item.requestUnassignedItems) return res(null); svc().Item.requestUnassignedItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  // My Club: one page of club players. EA's club search isn't documented; this tries
+  // services.Club.search with a player search and gives up after 10 s (diagnostics list the
+  // Club methods if it doesn't work).
+  function clubPage(offset, count) {
+    return new Promise(function (res) {
+      var to = setTimeout(function () { res(null); }, 10000), done = function (v) { clearTimeout(to); res(v); };
+      try {
+        var C = svc().Club; if (!C || typeof C.search !== 'function') return done(null);
+        var Ct = ctor(), c = Ct ? new Ct() : {}; c.type = 'player'; c.count = count; c.offset = offset;
+        C.search(c).observe(OBS, function (s, r) { done(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); });
+      } catch (e) { done(null); }
+    });
+  }
+  async function clubPlayers() {
+    var all = [], PAGE = 90;
+    for (var p = 0; p < 8; p++) {
+      var items = await clubPage(p * PAGE, PAGE); if (!items) return p ? all : null;
+      all = all.concat(items); if (items.length < PAGE) break;
+      await sleep(rand(700, 1500));
+    }
+    return all;
+  }
   function clearSold() { return new Promise(function (res) { try { if (!svc().Item.clearSoldItems) return res(false); svc().Item.clearSoldItems().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 
@@ -958,7 +994,7 @@
   }
 
   // ---------- Bulk list: many copies of one card at one price (e.g. 90 investment 88s) ----------
-  var bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+  var bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 };
   function bulkRows(items) {
     return items.map(function (it) {
       var st = tradeStateOf(it);
@@ -969,16 +1005,28 @@
   function lastPriceOf(def) { for (var i = priceHist.length - 1; i >= 0; i--) if (String(priceHist[i].id) === String(def)) return priceHist[i].p; return 0; }
   async function openBulk() {
     if (running) return;
-    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' }; rebuildView();
+    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 }; rebuildView();
     var items = await refreshHub(false);
     bulk.loading = false;
     if (!items) bulk.err = 'Could not read the transfer list. Open the Transfers tab in the web app once, then try again.';
     else bulk.groups = bulkGroups(bulkRows(items));
     rebuildView();
   }
+  // My Club: tradeable club players grouped like the transfer list; listing moves each one to the
+  // transfer list first, so only as many as there is room for.
+  async function openClub() {
+    if (running) return;
+    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'club', room: 0 }; rebuildView();
+    var tp = await transferItems(), club = await clubPlayers();
+    bulk.loading = false; bulk.room = Math.max(0, TRADEPILE_MAX - (tp ? tp.length : TRADEPILE_MAX));
+    if (!club) bulk.err = 'Could not read your club. Open the Club tab in the web app once, then try again. If it still fails, copy the diagnostics (Settings › Help).';
+    else bulk.groups = bulkGroups(bulkRows(club).map(function (r) { r.state = 'unlisted'; return r; }));
+    rebuildView();
+  }
+  function bulkMax(g) { return bulk.src === 'club' ? Math.min(g.count, bulk.room) : g.count; }
   function pickBulk(i) {
     var g = bulk.groups && bulk.groups[i]; if (!g) return;
-    bulk.sel = g; bulk.n = g.count; bulk.price = lastPriceOf(g.def); bulk.start = ''; bulk.err = ''; rebuildView();
+    bulk.sel = g; bulk.n = bulkMax(g); bulk.price = lastPriceOf(g.def); bulk.start = ''; bulk.err = ''; rebuildView();
   }
   function saveBulkInputs() {
     var v = function (id) { var e = document.getElementById(id); return e ? e.value : null; };
@@ -993,6 +1041,7 @@
       setActivity('Listing ' + (i + 1) + ' of ' + todo.length + ': ' + g.name + ' at ' + fmt(p.buy));
       if (i === 0 && !(await rangeOk(it, p.buy))) return 'price is outside EA\u2019s range for this card - nothing listed';
       await sleep(rand(1100, 2600)); if (!running) break;
+      if (g.src === 'club') { if (!(await moveToTransfer(it))) { if (++fails >= 2) { feed('Moving to the transfer list failed twice - stopped (full?)', 'stop'); break; } continue; } await sleep(rand(600, 1300)); }
       if (await listItem(it, p.start, p.buy, dur)) { done++; fails = 0; noteList(it.id, p.buy); if (done % 10 === 0) feed(done + ' of ' + todo.length + ' listed', 'list'); }
       else if (++fails >= 2) { feed('Listing failed twice in a row - stopped. EA busy or a captcha? Check the web app.', 'stop'); break; }
       else feed('Listing one ' + g.name + ' failed - trying the next', 'miss');
@@ -1003,14 +1052,39 @@
     var g = bulk.sel; if (!g) return;
     var p = bulkPrices(bulk.price, bulk.start);
     if (p.err) { bulk.err = p.err; rebuildView(); return; }
-    var n = Math.max(1, Math.min(g.count, Math.round(Number(bulk.n) || g.count))), dur = bulk.dur || cfg.listDur || 3600;
-    if (!window.confirm('List ' + n + ' × ' + g.name + '\nBuy Now ' + fmt(p.buy) + ' · start ' + fmt(p.start) + ' · ' + durLabel(dur) + (p.adjusted ? '\n(price snapped to EA\u2019s price steps)' : '') + '\n\nGo?')) return;
+    if (!(bulkMax(g) > 0)) { bulk.err = 'Your transfer list is full (' + TRADEPILE_MAX + '). Clear sold cards first.'; rebuildView(); return; }
+    var n = Math.max(1, Math.min(bulkMax(g), Math.round(Number(bulk.n) || bulkMax(g)))), dur = bulk.dur || cfg.listDur || 3600;
+    g.src = bulk.src;
+    if (!window.confirm('List ' + n + ' × ' + g.name + '\nBuy Now ' + fmt(p.buy) + ' · start ' + fmt(p.start) + ' · ' + durLabel(dur) + (p.adjusted ? '\n(price snapped to EA\u2019s price steps)' : '') + (bulk.src === 'club' ? '\nFrom your club: make sure none of them are in your squad.' : '') + '\n\nGo?')) return;
     if (!canStart()) return;
-    tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+    tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 };
     running = true; mode = 'job'; phase = 'job';
     feed('Listing ' + n + ' × ' + g.name + ' at ' + fmt(p.buy) + ' (start ' + fmt(p.start) + ', ' + durLabel(dur) + ')', 'check'); rebuildView();
     runBulk(g, p, n, dur).then(function (msg) { if (running) requestStop('Done: ' + msg); refreshHub(true); }).catch(function (e) { requestStop('bulk list error: ' + e); });
   }
+
+  // Auto relister: while the bot is NOT running, look at the transfer list every 4-7 min, book and
+  // (per Settings) clear sold cards and relist expired ones at their old price (EA's "Relist all").
+  // While sniping, the run itself does this. Session only: off after a reload.
+  var autoRel = { on: false, next: 0, count: 0, last: 0 };
+  function toggleAutoRelist() {
+    autoRel.on = !autoRel.on; autoRel.next = Date.now() + 2000;
+    feed(autoRel.on ? 'Auto relister on · every 4-7 min while the bot is idle' : 'Auto relister off', 'check'); render();
+  }
+  async function autoRelistPass() {
+    autoRel.next = Date.now() + rand(240000, 420000); hub.busy = 'auto';
+    try {
+      var items = await refreshHub(false); if (!items || running) return;
+      if (cfg.clearSold === 2 || (cfg.clearSold === 1 && hub.total >= TRADEPILE_MAX - 5)) await clearSoldNow();
+      if (hub.expired && !running) {
+        var n = hub.expired; await sleep(rand(800, 1800)); if (running) return;
+        if (await relistAllExpired()) { autoRel.count += n; hub.active += n; hub.expired = 0; feed('Auto relister: relisted ' + n + ' expired card' + (n > 1 ? 's' : ''), 'list'); }
+        else feed('Auto relister: relisting failed - trying again next round', 'miss');
+      }
+      autoRel.last = Date.now();
+    } finally { hub.busy = ''; render(); }
+  }
+  setInterval(function () { if (autoRel.on && !running && !hub.busy && haveServices() && Date.now() >= autoRel.next) autoRelistPass().catch(function () { hub.busy = ''; }); }, 10000);
 
   // Hub buttons that need searches run like a short sniping run (lock screen, Stop works).
   function startJob(kind) {
@@ -1049,7 +1123,7 @@
     var fnNames = function (o) { var out = {}; try { for (var p = o; p && p !== Object.prototype; p = Object.getPrototypeOf(p)) Object.getOwnPropertyNames(p).forEach(function (k) { try { if (k !== 'constructor' && typeof o[k] === 'function') out[k] = 1; } catch (e) {} }); } catch (e) {} return Object.keys(out).sort(); };
     var rows = document.querySelectorAll(ROW_SEL), withAvg = 0;
     for (var i = 0; i < rows.length; i++) if (parseCoins(avgLabelOf(rows[i])) > 0) withAvg++;
-    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
+    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], clubMethods: s && s.Club ? fnNames(s.Club) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
     var text = 'TangaTolga Sniper diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -1281,6 +1355,7 @@
     '.fs-mrow .msp{width:60px;height:20px;flex:none}.fs-mrow .pr{text-align:right;flex:none}.fs-mrow .pr b{display:block;font-size:15px;font-weight:700;' + NUM + '}.fs-mrow .pr span{font-size:12px;color:' + C_MUT + '}' +
     '.fs-mrow .pr .up{color:' + C_OK + '}.fs-mrow .pr .down{color:' + C_RED + '}' +
     // hub
+    '.fs-range-seg{max-width:none;margin-bottom:12px}.fs-range-seg .fs-sg{flex:1}#fs-h-auto .fs-sw{flex:none;pointer-events:none}' +
     '.fs-dash{display:grid;grid-template-columns:1.3fr 1fr;gap:10px;margin-bottom:0}' +
     '.fs-dc{position:relative;overflow:hidden;padding:15px 16px 12px;min-height:150px}' +
     '.fs-dc .dh{' + CAPS + '}.fs-dc .di{display:none}' +
@@ -1545,9 +1620,10 @@
   var hubFilter = 'all', hubShowAll = false;
   function hubView() {
     return '' +
+      '<div class="fs-segw fs-range-seg">' + RANGES.map(function (r, i) { return '<button class="fs-sg" data-hr="' + i + '">' + r + '</button>'; }).join('') + '</div>' +
       '<div class="fs-dash">' +
-        '<div class="fs-dc pr"><div class="dh">Profit</div><div class="dv" id="fs-h-total">—</div>' +
-          '<div class="dsub">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
+        '<div class="fs-dc pr"><div class="dh" id="fs-h-ph">Profit</div><div class="dv" id="fs-h-total">—</div>' +
+          '<div class="dsub" id="fs-h-unl">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
         '<div class="fs-dc ac"><div class="dh">Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
           '<div class="dsub">avg <b id="fs-h-avg">—</b> / card</div></div>' +
       '</div>' +
@@ -1563,7 +1639,9 @@
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
       '<div class="ios-h">Tools</div><div class="fs-hubbtns">' +
+        '<button class="fs-hb" id="fs-h-auto"><span class="ic">' + ICON.refresh + '</span><span class="tx"><b>Auto relister</b><span id="fs-h-auto-s">Off</span></span><span class="fs-sw" id="fs-h-auto-sw"></span></button>' +
         hubTool('fs-h-bulk', ICON.list, 'List many at one price', 'Pick a player on your transfer list, one price for all', '') +
+        hubTool('fs-h-club', ICON.grid, 'My Club', 'List club players at one price', '') +
         hubTool('fs-h-clear', ICON.coins, 'Book &amp; clear sold', 'refresh first', 'fs-h-clear-s') +
         hubTool('fs-h-exp', ICON.refresh, 'Re-price &amp; relist expired', 'refresh first', 'fs-h-exp-s') +
         hubTool('fs-h-packs', ICON.pack, 'List pack pulls', 'refresh first', 'fs-h-packs-s') +
@@ -1572,21 +1650,22 @@
   }
   function hubTool(id, ic, title, sub, subId) { return '<button class="fs-hb" id="' + id + '"><span class="ic">' + ic + '</span><span class="tx"><b>' + title + '</b><span' + (subId ? ' id="' + subId + '"' : '') + '>' + sub + '</span></span><span class="chev"></span></button>'; }
   function bulkView() {
-    var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>List many at one price</b></div>';
-    if (bulk.loading) return h + '<div class="fs-empty">Reading your transfer list…</div>';
+    var club = bulk.src === 'club';
+    var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>' + (club ? 'My Club' : 'List many at one price') + '</b></div>';
+    if (bulk.loading) return h + '<div class="fs-empty">Reading your ' + (club ? 'club' : 'transfer list') + '…</div>';
     if (!bulk.sel) {
       if (!bulk.groups) return h + '<div class="fs-empty">' + esc(bulk.err || '…') + '</div>';
-      return h + '<div class="ds" style="margin:2px 4px 10px">Cards on your transfer list that are not listed (or expired), grouped by player. Pick one.</div>' +
+      return h + '<div class="ds" style="margin:2px 4px 10px">' + (club ? 'Tradeable players in your club, grouped. Listing moves them to the transfer list first: room for <b>' + bulk.room + '</b> more.' : 'Cards on your transfer list that are not listed (or expired), grouped by player.') + ' Pick one.</div>' +
         (bulk.groups.length ? bulk.groups.map(function (g, i) {
-          return '<button class="fs-bkg" data-bk="' + i + '"><span class="nm">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '</span><span class="ct"><b>' + g.count + '</b> waiting' + (g.expired ? ' · ' + g.expired + ' expired' : '') + '</span></button>';
-        }).join('') : '<div class="fs-empty">Nothing waiting: every card on your transfer list is listed or sold.</div>');
+          return '<button class="fs-bkg" data-bk="' + i + '"><span class="nm">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '</span><span class="ct"><b>' + g.count + '</b> ' + (club ? 'in club' : 'waiting') + (g.expired ? ' · ' + g.expired + ' expired' : '') + '</span></button>';
+        }).join('') : '<div class="fs-empty">' + (club ? 'No tradeable players found in your club.' : 'Nothing waiting: every card on your transfer list is listed or sold.') + '</div>');
     }
     var g = bulk.sel, dur = bulk.dur || cfg.listDur || 3600;
     var inp = function (id, val, ph) { return '<input class="fs-num" id="' + id + '" type="text" inputmode="numeric" value="' + esc(val == null ? '' : String(val)) + '" placeholder="' + ph + '">'; };
     return h + '<div class="fs-card fs-bk-card"><div class="fs-bk-sel">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '<span>' + g.count + ' waiting</span></div>' +
         setting('Buy Now price', inp('fs-bk-price', bulk.price || '', 'e.g. 25000'), bulk.price && Number(bulk.price) === lastPriceOf(g.def) ? 'Your last price check for this card.' : 'Every card gets this price.') +
         setting('Start price', inp('fs-bk-start', bulk.start, 'auto'), 'Empty = one price step below Buy Now.') +
-        setting('How many', inp('fs-bk-n', bulk.n, String(g.count)), 'Up to ' + g.count + '.') +
+        setting('How many', inp('fs-bk-n', bulk.n, String(bulkMax(g))), 'Up to ' + bulkMax(g) + (club && bulkMax(g) < g.count ? ' (room on your transfer list).' : '.')) +
         '<div class="fs-set"><div class="nm">List for</div><div class="fs-segw">' + LIST_DURS.map(function (o) { return '<button class="fs-sg' + (o[1] === dur ? ' on' : '') + '" data-bkdur="' + o[1] + '">' + o[0] + '</button>'; }).join('') + '</div></div>' +
         (bulk.err ? '<div class="fs-bk-err">' + esc(bulk.err) + '</div>' : '') +
       '</div><button class="fs-btn fs-go" id="fs-bk-go">List</button><button class="fs-more" id="fs-bk-other">Pick another player</button>';
@@ -1614,19 +1693,26 @@
   }
   function renderHub($) {
     var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
-    var all = realProfit(0), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
+    var rg = cfg.hubRange | 0, since = rangeStart(rg, new Date());
+    var all = realProfit(since), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
     var yOnly = yest.sum - today.sum, unreal = 0;
     Object.keys(ledger.buys).forEach(function (id) { var b = ledger.buys[id]; if (b.list) unreal += profitAt(b.list, b.buy); });
+    if (rg < 3) unreal = 0; // unrealized = cards listed right now: only part of the all-time view
+    set('fs-h-ph', 'Profit · ' + RANGES[rg]); var ul = $('fs-h-unl'); if (ul) ul.style.display = rg < 3 ? 'none' : '';
     set('fs-h-total', all.n || unreal ? fmt(all.sum + unreal) : '—');
     set('fs-h-unreal', unreal ? signed(unreal) : '—');
     var vs = $('fs-h-vs');
     if (vs) {
       var pct = yOnly ? Math.round((today.sum - yOnly) / Math.abs(yOnly) * 100) : null;
-      var t = pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      var t = rg !== 0 ? all.n + ' card' + (all.n === 1 ? '' : 's') + ' sold' : pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      if (rg !== 0) pct = null;
       if (vs.textContent !== t) { vs.textContent = t; vs.className = 'dsub ' + (pct == null ? '' : pct >= 0 ? 'up' : 'down'); }
     }
-    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales, 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
-    set('fs-h-sess', String(sessions.length)); set('fs-h-srch', fmtk(life.searches || 0)); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
+    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales.filter(function (x) { return x.t >= since; }), 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
+    set('fs-h-sess', String(sessions.filter(function (x) { return x.t >= since; }).length)); set('fs-h-srch', fmtk(rg >= 3 ? life.searches || 0 : sumDays(searchDays, since)));
+    var hrs = document.querySelectorAll('[data-hr]'); for (var hi = 0; hi < hrs.length; hi++) { var hon = Number(hrs[hi].getAttribute('data-hr')) === rg; if (hrs[hi].classList.contains('on') !== hon) hrs[hi].classList.toggle('on', hon); }
+    set('fs-h-auto-s', autoRel.on ? (hub.busy === 'auto' ? 'On · checking…' : 'On · next check in ' + Math.max(1, Math.round((autoRel.next - Date.now()) / 60000)) + ' min' + (autoRel.count ? ' · ' + autoRel.count + ' relisted' : '')) : 'Off · relists expired cards every 4-7 min while idle');
+    var asw = $('fs-h-auto-sw'); if (asw) asw.className = 'fs-sw' + (autoRel.on ? ' on' : ''); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
     var st = safetyStatus(searchesToday(), life.lastBlock ? Date.now() - life.lastBlock : null), sb = $('fs-h-safe');
     if (sb) {
       sb.className = 'fs-safe ' + st.level; set('fs-h-safe-i', st.level === 'ok' ? '✓' : st.level === 'warn' ? '!' : '■');
@@ -1751,6 +1837,7 @@
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var sp = g('data-spd'); if (sp) { speedStep(Number(sp)); save(); render(); return; }
+      var hr = g('data-hr'); if (hr != null) { cfg.hubRange = Number(hr); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var bk = g('data-bk'); if (bk != null) { pickBulk(Number(bk)); return; }
       var bd = g('data-bkdur'); if (bd != null) { saveBulkInputs(); bulk.dur = Number(bd); rebuildView(); return; }
@@ -1773,6 +1860,8 @@
         case 'fs-reset2': if (window.confirm('Reset all-time stats and session history? This can’t be undone.')) { resetLife(); redrawTab(); } break;
         case 'fs-h-refresh': hubRefreshButton(); break;
         case 'fs-h-bulk': openBulk(); break;
+        case 'fs-h-club': openClub(); break;
+        case 'fs-h-auto': toggleAutoRelist(); break;
         case 'fs-bk-back': tab = 'hub'; rebuildView(); break;
         case 'fs-bk-other': saveBulkInputs(); bulk.sel = null; bulk.err = ''; rebuildView(); break;
         case 'fs-bk-go': saveBulkInputs(); startBulk(); break;

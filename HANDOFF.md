@@ -77,3 +77,8 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 - Speed −/+ (Sniper row and Settings): 0.2 s per tap, Custom speed (3), floor 0.4 s (`stepGap`).
 - Run & breaks: Auto/Custom for runtime, stop limit (Auto 15), out of coins (Auto = stop), breaks (Auto ~30 searches / ~90 s; Custom 0 = off). Daily cap stays always on.
 - Start row: Now or a time (HH:MM, session only, `startDelayMs`); Stop/Cancel while waiting.
+
+### 5.3.0 – Auto relister, My Club, dashboard range
+- Hub › Auto relister (session only): while idle, every 4-7 min reads the transfer list, clears sold (per Settings) and relists expired at the old price (`relistExpiredAuctions`).
+- Hub › My Club: `services.Club.search` (UTSearchCriteriaDTO, type player, pages of 90, 10 s timeout) — unverified on the live web app; diagnostics now list `clubMethods`. Reuses the bulk-list view (`bulk.src = 'club'`), moves each card to the transfer list before listing, capped to free room.
+- Hub range tabs Today / 7 days / 30 days / All (`cfg.hubRange`, `rangeStart`); searches per local day in `futSnipe.searchDays` (40 days).

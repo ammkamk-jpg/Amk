@@ -278,3 +278,19 @@ test("scheduled start: next time the clock shows HH:MM", () => {
   assert.equal(P.startDelayMs("25:00", now), null);
   assert.equal(P.startDelayMs("", now), null);
 });
+
+test("dashboard range: start of today / 7 / 30 days / all", () => {
+  const now = new Date(2026, 10, 14, 15, 30);
+  assert.equal(P.rangeStart(0, now), new Date(2026, 10, 14).getTime());
+  assert.equal(P.rangeStart(1, now), new Date(2026, 10, 8).getTime());
+  assert.equal(P.rangeStart(2, now), new Date(2026, 9, 16).getTime());
+  assert.equal(P.rangeStart(3, now), 0);
+});
+
+test("per-day search counts sum from a start day", () => {
+  assert.equal(P.dayKey(new Date(2026, 0, 5)), "2026-01-05");
+  const m = { "2026-11-14": 40, "2026-11-10": 25, "2026-10-01": 100 };
+  assert.equal(P.sumDays(m, new Date(2026, 10, 14).getTime()), 40);
+  assert.equal(P.sumDays(m, new Date(2026, 10, 8).getTime()), 65);
+  assert.equal(P.sumDays(m, 0), 165);
+});

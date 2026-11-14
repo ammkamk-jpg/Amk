@@ -129,7 +129,7 @@
   }
 
   // ---------- Bulk list: many copies of one card at one price (e.g. 90 investment 88s) ----------
-  var bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+  var bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 };
   function bulkRows(items) {
     return items.map(function (it) {
       var st = tradeStateOf(it);
@@ -140,16 +140,28 @@
   function lastPriceOf(def) { for (var i = priceHist.length - 1; i >= 0; i--) if (String(priceHist[i].id) === String(def)) return priceHist[i].p; return 0; }
   async function openBulk() {
     if (running) return;
-    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' }; rebuildView();
+    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 }; rebuildView();
     var items = await refreshHub(false);
     bulk.loading = false;
     if (!items) bulk.err = 'Could not read the transfer list. Open the Transfers tab in the web app once, then try again.';
     else bulk.groups = bulkGroups(bulkRows(items));
     rebuildView();
   }
+  // My Club: tradeable club players grouped like the transfer list; listing moves each one to the
+  // transfer list first, so only as many as there is room for.
+  async function openClub() {
+    if (running) return;
+    tab = 'bulk'; bulk = { loading: true, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'club', room: 0 }; rebuildView();
+    var tp = await transferItems(), club = await clubPlayers();
+    bulk.loading = false; bulk.room = Math.max(0, TRADEPILE_MAX - (tp ? tp.length : TRADEPILE_MAX));
+    if (!club) bulk.err = 'Could not read your club. Open the Club tab in the web app once, then try again. If it still fails, copy the diagnostics (Settings › Help).';
+    else bulk.groups = bulkGroups(bulkRows(club).map(function (r) { r.state = 'unlisted'; return r; }));
+    rebuildView();
+  }
+  function bulkMax(g) { return bulk.src === 'club' ? Math.min(g.count, bulk.room) : g.count; }
   function pickBulk(i) {
     var g = bulk.groups && bulk.groups[i]; if (!g) return;
-    bulk.sel = g; bulk.n = g.count; bulk.price = lastPriceOf(g.def); bulk.start = ''; bulk.err = ''; rebuildView();
+    bulk.sel = g; bulk.n = bulkMax(g); bulk.price = lastPriceOf(g.def); bulk.start = ''; bulk.err = ''; rebuildView();
   }
   function saveBulkInputs() {
     var v = function (id) { var e = document.getElementById(id); return e ? e.value : null; };
@@ -164,6 +176,7 @@
       setActivity('Listing ' + (i + 1) + ' of ' + todo.length + ': ' + g.name + ' at ' + fmt(p.buy));
       if (i === 0 && !(await rangeOk(it, p.buy))) return 'price is outside EA\u2019s range for this card - nothing listed';
       await sleep(rand(1100, 2600)); if (!running) break;
+      if (g.src === 'club') { if (!(await moveToTransfer(it))) { if (++fails >= 2) { feed('Moving to the transfer list failed twice - stopped (full?)', 'stop'); break; } continue; } await sleep(rand(600, 1300)); }
       if (await listItem(it, p.start, p.buy, dur)) { done++; fails = 0; noteList(it.id, p.buy); if (done % 10 === 0) feed(done + ' of ' + todo.length + ' listed', 'list'); }
       else if (++fails >= 2) { feed('Listing failed twice in a row - stopped. EA busy or a captcha? Check the web app.', 'stop'); break; }
       else feed('Listing one ' + g.name + ' failed - trying the next', 'miss');
@@ -174,14 +187,39 @@
     var g = bulk.sel; if (!g) return;
     var p = bulkPrices(bulk.price, bulk.start);
     if (p.err) { bulk.err = p.err; rebuildView(); return; }
-    var n = Math.max(1, Math.min(g.count, Math.round(Number(bulk.n) || g.count))), dur = bulk.dur || cfg.listDur || 3600;
-    if (!window.confirm('List ' + n + ' × ' + g.name + '\nBuy Now ' + fmt(p.buy) + ' · start ' + fmt(p.start) + ' · ' + durLabel(dur) + (p.adjusted ? '\n(price snapped to EA\u2019s price steps)' : '') + '\n\nGo?')) return;
+    if (!(bulkMax(g) > 0)) { bulk.err = 'Your transfer list is full (' + TRADEPILE_MAX + '). Clear sold cards first.'; rebuildView(); return; }
+    var n = Math.max(1, Math.min(bulkMax(g), Math.round(Number(bulk.n) || bulkMax(g)))), dur = bulk.dur || cfg.listDur || 3600;
+    g.src = bulk.src;
+    if (!window.confirm('List ' + n + ' × ' + g.name + '\nBuy Now ' + fmt(p.buy) + ' · start ' + fmt(p.start) + ' · ' + durLabel(dur) + (p.adjusted ? '\n(price snapped to EA\u2019s price steps)' : '') + (bulk.src === 'club' ? '\nFrom your club: make sure none of them are in your squad.' : '') + '\n\nGo?')) return;
     if (!canStart()) return;
-    tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '' };
+    tab = 'hub'; bulk = { loading: false, groups: null, sel: null, price: 0, start: '', n: 0, dur: 0, err: '', src: 'tp', room: 0 };
     running = true; mode = 'job'; phase = 'job';
     feed('Listing ' + n + ' × ' + g.name + ' at ' + fmt(p.buy) + ' (start ' + fmt(p.start) + ', ' + durLabel(dur) + ')', 'check'); rebuildView();
     runBulk(g, p, n, dur).then(function (msg) { if (running) requestStop('Done: ' + msg); refreshHub(true); }).catch(function (e) { requestStop('bulk list error: ' + e); });
   }
+
+  // Auto relister: while the bot is NOT running, look at the transfer list every 4-7 min, book and
+  // (per Settings) clear sold cards and relist expired ones at their old price (EA's "Relist all").
+  // While sniping, the run itself does this. Session only: off after a reload.
+  var autoRel = { on: false, next: 0, count: 0, last: 0 };
+  function toggleAutoRelist() {
+    autoRel.on = !autoRel.on; autoRel.next = Date.now() + 2000;
+    feed(autoRel.on ? 'Auto relister on · every 4-7 min while the bot is idle' : 'Auto relister off', 'check'); render();
+  }
+  async function autoRelistPass() {
+    autoRel.next = Date.now() + rand(240000, 420000); hub.busy = 'auto';
+    try {
+      var items = await refreshHub(false); if (!items || running) return;
+      if (cfg.clearSold === 2 || (cfg.clearSold === 1 && hub.total >= TRADEPILE_MAX - 5)) await clearSoldNow();
+      if (hub.expired && !running) {
+        var n = hub.expired; await sleep(rand(800, 1800)); if (running) return;
+        if (await relistAllExpired()) { autoRel.count += n; hub.active += n; hub.expired = 0; feed('Auto relister: relisted ' + n + ' expired card' + (n > 1 ? 's' : ''), 'list'); }
+        else feed('Auto relister: relisting failed - trying again next round', 'miss');
+      }
+      autoRel.last = Date.now();
+    } finally { hub.busy = ''; render(); }
+  }
+  setInterval(function () { if (autoRel.on && !running && !hub.busy && haveServices() && Date.now() >= autoRel.next) autoRelistPass().catch(function () { hub.busy = ''; }); }, 10000);
 
   // Hub buttons that need searches run like a short sniping run (lock screen, Stop works).
   function startJob(kind) {

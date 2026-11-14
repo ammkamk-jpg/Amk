@@ -105,6 +105,7 @@
     '.fs-mrow .msp{width:60px;height:20px;flex:none}.fs-mrow .pr{text-align:right;flex:none}.fs-mrow .pr b{display:block;font-size:15px;font-weight:700;' + NUM + '}.fs-mrow .pr span{font-size:12px;color:' + C_MUT + '}' +
     '.fs-mrow .pr .up{color:' + C_OK + '}.fs-mrow .pr .down{color:' + C_RED + '}' +
     // hub
+    '.fs-range-seg{max-width:none;margin-bottom:12px}.fs-range-seg .fs-sg{flex:1}#fs-h-auto .fs-sw{flex:none;pointer-events:none}' +
     '.fs-dash{display:grid;grid-template-columns:1.3fr 1fr;gap:10px;margin-bottom:0}' +
     '.fs-dc{position:relative;overflow:hidden;padding:15px 16px 12px;min-height:150px}' +
     '.fs-dc .dh{' + CAPS + '}.fs-dc .di{display:none}' +

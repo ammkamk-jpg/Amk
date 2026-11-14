@@ -174,6 +174,28 @@
   function isTradable(it) { try { if (typeof it.isTradeable === 'function') return !!it.isTradeable(); } catch (e) {} return it.tradable !== false && !(it.untradeableCount > 0); }
   function isPlayer(it) { try { return it.type === 'player' || (typeof it.isPlayer === 'function' && it.isPlayer()); } catch (e) { return false; } }
   function unassignedItems() { return new Promise(function (res) { try { if (!svc().Item.requestUnassignedItems) return res(null); svc().Item.requestUnassignedItems().observe(OBS, function (s, r) { res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  // My Club: one page of club players. EA's club search isn't documented; this tries
+  // services.Club.search with a player search and gives up after 10 s (diagnostics list the
+  // Club methods if it doesn't work).
+  function clubPage(offset, count) {
+    return new Promise(function (res) {
+      var to = setTimeout(function () { res(null); }, 10000), done = function (v) { clearTimeout(to); res(v); };
+      try {
+        var C = svc().Club; if (!C || typeof C.search !== 'function') return done(null);
+        var Ct = ctor(), c = Ct ? new Ct() : {}; c.type = 'player'; c.count = count; c.offset = offset;
+        C.search(c).observe(OBS, function (s, r) { done(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); });
+      } catch (e) { done(null); }
+    });
+  }
+  async function clubPlayers() {
+    var all = [], PAGE = 90;
+    for (var p = 0; p < 8; p++) {
+      var items = await clubPage(p * PAGE, PAGE); if (!items) return p ? all : null;
+      all = all.concat(items); if (items.length < PAGE) break;
+      await sleep(rand(700, 1500));
+    }
+    return all;
+  }
   function clearSold() { return new Promise(function (res) { try { if (!svc().Item.clearSoldItems) return res(false); svc().Item.clearSoldItems().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 

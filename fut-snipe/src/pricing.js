@@ -186,6 +186,16 @@
     return t.getTime() - now.getTime();
   }
 
+  // Dashboard range: 0 today, 1 last 7 days, 2 last 30 days, 3 all time -> start time in ms.
+  var RANGES = ['Today', '7 days', '30 days', 'All'];
+  function rangeStart(r, now) { if ((r | 0) >= 3) return 0; var d = new Date(now.getTime()); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - [0, 6, 29][r | 0]); return d.getTime(); }
+  // Local calendar day 'YYYY-MM-DD' (per-day search counts).
+  function dayKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function sumDays(map, sinceMs) {
+    var sum = 0; Object.keys(map || {}).forEach(function (k) { var p = k.split('-'); if (new Date(+p[0], +p[1] - 1, +p[2]).getTime() >= sinceMs) sum += map[k] | 0; });
+    return sum;
+  }
+
   // Bulk list: cards waiting on the transfer list (not listed, or expired), grouped by exact card
   // version, most copies first. rows: [{def, name, rating, state, tradable, player, it}].
   function bulkGroups(rows) {
@@ -225,5 +235,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays };
   }

@@ -195,9 +195,10 @@
   var hubFilter = 'all', hubShowAll = false;
   function hubView() {
     return '' +
+      '<div class="fs-segw fs-range-seg">' + RANGES.map(function (r, i) { return '<button class="fs-sg" data-hr="' + i + '">' + r + '</button>'; }).join('') + '</div>' +
       '<div class="fs-dash">' +
-        '<div class="fs-dc pr"><div class="dh">Profit</div><div class="dv" id="fs-h-total">—</div>' +
-          '<div class="dsub">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
+        '<div class="fs-dc pr"><div class="dh" id="fs-h-ph">Profit</div><div class="dv" id="fs-h-total">—</div>' +
+          '<div class="dsub" id="fs-h-unl">of which unrealized <b id="fs-h-unreal">—</b></div><div class="dsub" id="fs-h-vs"></div><svg class="spark" id="fs-h-spark" viewBox="0 0 100 32" preserveAspectRatio="none"></svg></div>' +
         '<div class="fs-dc ac"><div class="dh">Activity</div><div class="dpair"><div><b id="fs-h-sess">—</b><span>sessions</span></div><div><b id="fs-h-srch">—</b><span>searches</span></div></div>' +
           '<div class="dsub">avg <b id="fs-h-avg">—</b> / card</div></div>' +
       '</div>' +
@@ -213,7 +214,9 @@
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
       '</div></div>' +
       '<div class="ios-h">Tools</div><div class="fs-hubbtns">' +
+        '<button class="fs-hb" id="fs-h-auto"><span class="ic">' + ICON.refresh + '</span><span class="tx"><b>Auto relister</b><span id="fs-h-auto-s">Off</span></span><span class="fs-sw" id="fs-h-auto-sw"></span></button>' +
         hubTool('fs-h-bulk', ICON.list, 'List many at one price', 'Pick a player on your transfer list, one price for all', '') +
+        hubTool('fs-h-club', ICON.grid, 'My Club', 'List club players at one price', '') +
         hubTool('fs-h-clear', ICON.coins, 'Book &amp; clear sold', 'refresh first', 'fs-h-clear-s') +
         hubTool('fs-h-exp', ICON.refresh, 'Re-price &amp; relist expired', 'refresh first', 'fs-h-exp-s') +
         hubTool('fs-h-packs', ICON.pack, 'List pack pulls', 'refresh first', 'fs-h-packs-s') +
@@ -222,21 +225,22 @@
   }
   function hubTool(id, ic, title, sub, subId) { return '<button class="fs-hb" id="' + id + '"><span class="ic">' + ic + '</span><span class="tx"><b>' + title + '</b><span' + (subId ? ' id="' + subId + '"' : '') + '>' + sub + '</span></span><span class="chev"></span></button>'; }
   function bulkView() {
-    var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>List many at one price</b></div>';
-    if (bulk.loading) return h + '<div class="fs-empty">Reading your transfer list…</div>';
+    var club = bulk.src === 'club';
+    var h = '<div class="fs-bk-head"><button class="fs-bk-back" id="fs-bk-back">‹ Hub</button><b>' + (club ? 'My Club' : 'List many at one price') + '</b></div>';
+    if (bulk.loading) return h + '<div class="fs-empty">Reading your ' + (club ? 'club' : 'transfer list') + '…</div>';
     if (!bulk.sel) {
       if (!bulk.groups) return h + '<div class="fs-empty">' + esc(bulk.err || '…') + '</div>';
-      return h + '<div class="ds" style="margin:2px 4px 10px">Cards on your transfer list that are not listed (or expired), grouped by player. Pick one.</div>' +
+      return h + '<div class="ds" style="margin:2px 4px 10px">' + (club ? 'Tradeable players in your club, grouped. Listing moves them to the transfer list first: room for <b>' + bulk.room + '</b> more.' : 'Cards on your transfer list that are not listed (or expired), grouped by player.') + ' Pick one.</div>' +
         (bulk.groups.length ? bulk.groups.map(function (g, i) {
-          return '<button class="fs-bkg" data-bk="' + i + '"><span class="nm">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '</span><span class="ct"><b>' + g.count + '</b> waiting' + (g.expired ? ' · ' + g.expired + ' expired' : '') + '</span></button>';
-        }).join('') : '<div class="fs-empty">Nothing waiting: every card on your transfer list is listed or sold.</div>');
+          return '<button class="fs-bkg" data-bk="' + i + '"><span class="nm">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '</span><span class="ct"><b>' + g.count + '</b> ' + (club ? 'in club' : 'waiting') + (g.expired ? ' · ' + g.expired + ' expired' : '') + '</span></button>';
+        }).join('') : '<div class="fs-empty">' + (club ? 'No tradeable players found in your club.' : 'Nothing waiting: every card on your transfer list is listed or sold.') + '</div>');
     }
     var g = bulk.sel, dur = bulk.dur || cfg.listDur || 3600;
     var inp = function (id, val, ph) { return '<input class="fs-num" id="' + id + '" type="text" inputmode="numeric" value="' + esc(val == null ? '' : String(val)) + '" placeholder="' + ph + '">'; };
     return h + '<div class="fs-card fs-bk-card"><div class="fs-bk-sel">' + esc(g.name) + (g.rating ? ' <i>' + g.rating + '</i>' : '') + '<span>' + g.count + ' waiting</span></div>' +
         setting('Buy Now price', inp('fs-bk-price', bulk.price || '', 'e.g. 25000'), bulk.price && Number(bulk.price) === lastPriceOf(g.def) ? 'Your last price check for this card.' : 'Every card gets this price.') +
         setting('Start price', inp('fs-bk-start', bulk.start, 'auto'), 'Empty = one price step below Buy Now.') +
-        setting('How many', inp('fs-bk-n', bulk.n, String(g.count)), 'Up to ' + g.count + '.') +
+        setting('How many', inp('fs-bk-n', bulk.n, String(bulkMax(g))), 'Up to ' + bulkMax(g) + (club && bulkMax(g) < g.count ? ' (room on your transfer list).' : '.')) +
         '<div class="fs-set"><div class="nm">List for</div><div class="fs-segw">' + LIST_DURS.map(function (o) { return '<button class="fs-sg' + (o[1] === dur ? ' on' : '') + '" data-bkdur="' + o[1] + '">' + o[0] + '</button>'; }).join('') + '</div></div>' +
         (bulk.err ? '<div class="fs-bk-err">' + esc(bulk.err) + '</div>' : '') +
       '</div><button class="fs-btn fs-go" id="fs-bk-go">List</button><button class="fs-more" id="fs-bk-other">Pick another player</button>';
@@ -264,19 +268,26 @@
   }
   function renderHub($) {
     var set = function (id, v) { var el = $(id); if (el && el.textContent !== v) el.textContent = v; };
-    var all = realProfit(0), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
+    var rg = cfg.hubRange | 0, since = rangeStart(rg, new Date());
+    var all = realProfit(since), today = realProfit(startOfToday()), yest = realProfit(startOfToday() - 86400000);
     var yOnly = yest.sum - today.sum, unreal = 0;
     Object.keys(ledger.buys).forEach(function (id) { var b = ledger.buys[id]; if (b.list) unreal += profitAt(b.list, b.buy); });
+    if (rg < 3) unreal = 0; // unrealized = cards listed right now: only part of the all-time view
+    set('fs-h-ph', 'Profit · ' + RANGES[rg]); var ul = $('fs-h-unl'); if (ul) ul.style.display = rg < 3 ? 'none' : '';
     set('fs-h-total', all.n || unreal ? fmt(all.sum + unreal) : '—');
     set('fs-h-unreal', unreal ? signed(unreal) : '—');
     var vs = $('fs-h-vs');
     if (vs) {
       var pct = yOnly ? Math.round((today.sum - yOnly) / Math.abs(yOnly) * 100) : null;
-      var t = pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      var t = rg !== 0 ? all.n + ' card' + (all.n === 1 ? '' : 's') + ' sold' : pct == null ? 'today ' + (today.n ? signed(today.sum) : '—') : (pct >= 0 ? '▲ +' : '▼ ') + pct + '% vs. yesterday';
+      if (rg !== 0) pct = null;
       if (vs.textContent !== t) { vs.textContent = t; vs.className = 'dsub ' + (pct == null ? '' : pct >= 0 ? 'up' : 'down'); }
     }
-    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales, 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
-    set('fs-h-sess', String(sessions.length)); set('fs-h-srch', fmtk(life.searches || 0)); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
+    var sp = $('fs-h-spark'), sh = sparkSVG(profitCurve(ledger.sales.filter(function (x) { return x.t >= since; }), 30)); if (sp && sp.__h !== sh) { sp.__h = sh; sp.innerHTML = sh; }
+    set('fs-h-sess', String(sessions.filter(function (x) { return x.t >= since; }).length)); set('fs-h-srch', fmtk(rg >= 3 ? life.searches || 0 : sumDays(searchDays, since)));
+    var hrs = document.querySelectorAll('[data-hr]'); for (var hi = 0; hi < hrs.length; hi++) { var hon = Number(hrs[hi].getAttribute('data-hr')) === rg; if (hrs[hi].classList.contains('on') !== hon) hrs[hi].classList.toggle('on', hon); }
+    set('fs-h-auto-s', autoRel.on ? (hub.busy === 'auto' ? 'On · checking…' : 'On · next check in ' + Math.max(1, Math.round((autoRel.next - Date.now()) / 60000)) + ' min' + (autoRel.count ? ' · ' + autoRel.count + ' relisted' : '')) : 'Off · relists expired cards every 4-7 min while idle');
+    var asw = $('fs-h-auto-sw'); if (asw) asw.className = 'fs-sw' + (autoRel.on ? ' on' : ''); set('fs-h-avg', all.n ? fmt(Math.round(all.sum / all.n)) : '—');
     var st = safetyStatus(searchesToday(), life.lastBlock ? Date.now() - life.lastBlock : null), sb = $('fs-h-safe');
     if (sb) {
       sb.className = 'fs-safe ' + st.level; set('fs-h-safe-i', st.level === 'ok' ? '✓' : st.level === 'warn' ? '!' : '■');
@@ -401,6 +412,7 @@
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
       var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var sp = g('data-spd'); if (sp) { speedStep(Number(sp)); save(); render(); return; }
+      var hr = g('data-hr'); if (hr != null) { cfg.hubRange = Number(hr); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }
       var bk = g('data-bk'); if (bk != null) { pickBulk(Number(bk)); return; }
       var bd = g('data-bkdur'); if (bd != null) { saveBulkInputs(); bulk.dur = Number(bd); rebuildView(); return; }
@@ -423,6 +435,8 @@
         case 'fs-reset2': if (window.confirm('Reset all-time stats and session history? This can’t be undone.')) { resetLife(); redrawTab(); } break;
         case 'fs-h-refresh': hubRefreshButton(); break;
         case 'fs-h-bulk': openBulk(); break;
+        case 'fs-h-club': openClub(); break;
+        case 'fs-h-auto': toggleAutoRelist(); break;
         case 'fs-bk-back': tab = 'hub'; rebuildView(); break;
         case 'fs-bk-other': saveBulkInputs(); bulk.sel = null; bulk.err = ''; rebuildView(); break;
         case 'fs-bk-go': saveBulkInputs(); startBulk(); break;
