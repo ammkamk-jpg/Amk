@@ -186,6 +186,17 @@
     return t.getTime() - now.getTime();
   }
 
+  // Auto bidder: the bid EA accepts next (starting bid if nobody bid yet, else one step up), and
+  // which auctions to bid on: ending within maxSecs (but not in the last 3 s), not already ours,
+  // next bid within maxBid; soonest first.
+  function nextBid(cur, start) { return cur > 0 ? cur + stepFor(cur) : Math.max(MIN_PRICE, start | 0); }
+  function bidPick(rows, maxBid, maxSecs) {
+    return (rows || []).filter(function (r) { return r && r.secs != null && r.secs > 3 && r.secs <= maxSecs && !r.mine; })
+      .map(function (r) { return Object.assign({}, r, { bid: nextBid(r.cur, r.start) }); })
+      .filter(function (r) { return r.bid <= maxBid; })
+      .sort(function (a, b) { return a.secs - b.secs; });
+  }
+
   // Dashboard range: 0 today, 1 last 7 days, 2 last 30 days, 3 all time -> start time in ms.
   var RANGES = ['Today', '7 days', '30 days', 'All'];
   function rangeStart(r, now) { if ((r | 0) >= 3) return 0; var d = new Date(now.getTime()); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - [0, 6, 29][r | 0]); return d.getTime(); }
@@ -235,5 +246,5 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays, nextBid: nextBid, bidPick: bidPick };
   }

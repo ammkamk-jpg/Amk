@@ -294,3 +294,19 @@ test("per-day search counts sum from a start day", () => {
   assert.equal(P.sumDays(m, new Date(2026, 10, 8).getTime()), 65);
   assert.equal(P.sumDays(m, 0), 165);
 });
+
+test("auto bidder: next bid and which auctions to bid on", () => {
+  assert.equal(P.nextBid(0, 10000), 10000, "no bid yet: starting bid");
+  assert.equal(P.nextBid(10000, 9000), 10250, "one step up");
+  assert.equal(P.nextBid(0, 0), P.MIN_PRICE, "never under EA's minimum");
+  const rows = [
+    { id: 1, secs: 50, cur: 14000, start: 10000 },
+    { id: 2, secs: 20, cur: 0, start: 12000 },
+    { id: 3, secs: 2, cur: 0, start: 1000 },            // last seconds: too late
+    { id: 4, secs: 200, cur: 0, start: 1000 },          // ends too late
+    { id: 5, secs: 30, cur: 15000, start: 1000 },       // next bid 15,250 > max
+    { id: 6, secs: 40, cur: 0, start: 1000, mine: true } // already ours
+  ];
+  const p = P.bidPick(rows, 15000, 90);
+  assert.deepEqual(p.map((r) => [r.id, r.bid]), [[2, 12000], [1, 14250]]);
+});

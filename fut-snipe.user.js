@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.3.0
+// @version      5.4.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.3.0';
+  var VERSION = '5.4.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -230,6 +230,17 @@
     return t.getTime() - now.getTime();
   }
 
+  // Auto bidder: the bid EA accepts next (starting bid if nobody bid yet, else one step up), and
+  // which auctions to bid on: ending within maxSecs (but not in the last 3 s), not already ours,
+  // next bid within maxBid; soonest first.
+  function nextBid(cur, start) { return cur > 0 ? cur + stepFor(cur) : Math.max(MIN_PRICE, start | 0); }
+  function bidPick(rows, maxBid, maxSecs) {
+    return (rows || []).filter(function (r) { return r && r.secs != null && r.secs > 3 && r.secs <= maxSecs && !r.mine; })
+      .map(function (r) { return Object.assign({}, r, { bid: nextBid(r.cur, r.start) }); })
+      .filter(function (r) { return r.bid <= maxBid; })
+      .sort(function (a, b) { return a.secs - b.secs; });
+  }
+
   // Dashboard range: 0 today, 1 last 7 days, 2 last 30 days, 3 all time -> start time in ms.
   var RANGES = ['Today', '7 days', '30 days', 'All'];
   function rangeStart(r, now) { if ((r | 0) >= 3) return 0; var d = new Date(now.getTime()); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - [0, 6, 29][r | 0]); return d.getTime(); }
@@ -279,7 +290,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays };
+    module.exports = { EA_TAX: EA_TAX, MIN_PRICE: MIN_PRICE, FEW: FEW, stepFor: stepFor, roundStep: roundStep, floorStep: floorStep, afterTax: afterTax, profitAt: profitAt, snipePoint: snipePoint, isFreshSecs: isFreshSecs, pickMarketPrice: pickMarketPrice, probeMid: probeMid, probeVerdict: probeVerdict, nextProbe: nextProbe, humanGapMs: humanGapMs, nextMood: nextMood, fuzzyCount: fuzzyCount, parseCoins: parseCoins, sellAndSnipe: sellAndSnipe, baseIdOf: baseIdOf, safetyStatus: safetyStatus, profitCurve: profitCurve, TOO_MANY: TOO_MANY, tooManyResults: tooManyResults, outsideRange: outsideRange, isSpecialBuy: isSpecialBuy, hasRarityFilter: hasRarityFilter, nextMinBid: nextMinBid, breakEven: breakEven, repriceFloor: repriceFloor, cardTrends: cardTrends, marketIndex: marketIndex, scanExport: scanExport, bulkGroups: bulkGroups, bulkPrices: bulkPrices, stepGap: stepGap, startDelayMs: startDelayMs, rangeStart: rangeStart, dayKey: dayKey, sumDays: sumDays, nextBid: nextBid, bidPick: bidPick };
   }
 
   // ---------- settings & storage ----------
@@ -288,7 +299,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -432,11 +443,11 @@
   function applyFields(t, s) { for (var k in s) { if (k !== '__fromUs' && s[k] !== undefined && s[k] !== '') { try { t[k] = s[k]; } catch (e) {} } } return t; }
   // The user's search (player, rarity, ...) but with OUR prices: their own max-buy / min-buy /
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
-  function buildCriteria(maxBuy, minBuy, minBid) {
+  function buildCriteria(maxBuy, minBuy, minBid, maxBid) {
     var out;
     if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
     else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
-    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = minBid > 0 ? minBid : 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
+    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = minBid > 0 ? minBid : 0; out.maxBid = maxBid > 0 ? maxBid : 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
@@ -532,12 +543,12 @@
     return { stop: false, msg: 'request failed (' + code + ')' };
   }
   // One market search. Returns {ok, items: [{it, p, secs}] sorted cheapest first}.
-  function doSearch(maxBuy, minBuy, minBid) {
+  function doSearch(maxBuy, minBuy, minBid, maxBid) {
     return new Promise(function (resolve) {
       var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
       var to = setTimeout(function () { finish({ ok: false, items: [], err: { msg: 'search timeout' } }); }, 15000);
       try { try { svc().Item.clearTransferMarketCache(); } catch (e) {}
-        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy, minBid), 1).observe(OBS, function (sender, resp) {
+        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy, minBid, maxBid), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
           var raw = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
           var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || raw.length));
@@ -601,6 +612,10 @@
     }
     return all;
   }
+  // Auto bidder: auction data of a card, the watchlist (cards you bid on), and removing a lost one.
+  function auctionOf(it) { var a = (it && it._auction) || {}; return { cur: a.currentBid | 0, start: a.startingBid | 0, bidState: a.bidState || null, tradeState: a.tradeState || null }; }
+  function watchedItems() { return new Promise(function (res) { var to = setTimeout(function () { res(null); }, 12000); try { if (!svc().Item.requestWatchedItems) return res(null); svc().Item.requestWatchedItems().observe(OBS, function (s, r) { clearTimeout(to); res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  function untargetItem(it) { return new Promise(function (res) { try { if (!svc().Item.untarget) return res(false); svc().Item.untarget([it]).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function clearSold() { return new Promise(function (res) { try { if (!svc().Item.clearSoldItems) return res(false); svc().Item.clearSoldItems().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 
@@ -644,9 +659,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 0.6 : 1)));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow, minBuy, minBid) {
+  async function search(maxBuy, slow, minBuy, minBid, maxBid) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy, minBuy, minBid); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy, minBid, maxBid); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -804,13 +819,64 @@
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
   }
 
+  // ---------- Auto bidder: bid on auctions about to end, collect the won cards ----------
+  // Max bid: your web app search's Max. Bid (else its Max. Buy Now) in Transfer list / Unassigned
+  // mode, the checked snipe point in List mode. One bid per card, no bidding wars.
+  function bidMode() { return (cfg.bidMode | 0) === 1; }
+  function bidMaxNow() { if (!keepMode()) return market.snipe || 0; var c = webCrit(); return floorStep(c && c.maxBid > 0 ? Number(c.maxBid) : keepMaxNow()); }
+  var bids = {}; // id -> {it, amt, end, name}
+  function openBids() { return Object.keys(bids).length; }
+  async function bidOnce() {
+    var maxB = bidMaxNow(); if (!(maxB > 0)) return requestStop('no max bid: set a Max. Bid or Max. Buy Now in the web app search');
+    var room = Math.max(1, cfg.bidCap | 0) - openBids();
+    if (room > 0) {
+      var r = await search(0, false, 0, 0, maxB); if (!r) return;
+      if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
+      var rows = r.items.map(function (x) { var a = auctionOf(x.it); return { it: x.it, id: x.it.id, secs: x.secs, cur: a.cur, start: a.start, mine: a.bidState === 'highest' || !!bids[x.it.id] }; });
+      var picks = bidPick(rows, maxB, cfg.bidSecs || 90).slice(0, room), placed = 0;
+      for (var i = 0; i < picks.length && running; i++) {
+        var pk = picks[i], bal = coins();
+        if (bal != null && pk.bid > bal) { if (!cfg.cCoins) return requestStop('out of coins for bids (' + fmt(bal) + ' left)'); break; }
+        var b = await doBuy(pk.it, pk.bid); if (!running) return;
+        if (b.ok) { placed++; bids[pk.id] = { it: pk.it, amt: pk.bid, end: Date.now() + pk.secs * 1000, name: cardLabel(pk.it) }; feed('Bid ' + fmt(pk.bid) + ' on ' + cardLabel(pk.it) + ' · ends in ' + pk.secs + 's', 'check'); }
+        else { feed(cardLabel(pk.it) + ' bid ' + fmt(pk.bid) + ' · ' + ((b.err && b.err.msg) || 'failed'), 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
+        await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
+      }
+      if (!placed) setActivity('Bidding ' + searchLabel() + ' ≤ ' + fmt(maxB) + ' · ' + openBids() + ' open bid' + (openBids() === 1 ? '' : 's'));
+    } else if (!(await pace(false))) return;
+    await settleBids();
+  }
+  // Ended auctions (+8 s): read the watchlist once, keep the won cards (list / move them like a
+  // bought card), remove the lost ones from the watchlist.
+  async function settleBids() {
+    var now = Date.now(), due = Object.keys(bids).filter(function (id) { return bids[id].end + 8000 < now; });
+    if (!due.length || !running) return;
+    var w = await watchedItems(); if (!w) { feed('Could not read the watchlist', 'miss'); return; }
+    var byId = {}; w.forEach(function (it) { byId[String(it.id)] = it; });
+    for (var i = 0; i < due.length && running; i++) {
+      var b = bids[due[i]], it = byId[String(due[i])], a = auctionOf(it);
+      if (it && a.tradeState === 'active') { b.end = Date.now() + 15000; continue; } // still running (EA extends near the end)
+      delete bids[due[i]];
+      if (it && a.bidState === 'highest') {
+        var paid = a.cur || b.amt, keep = keepMode(), e = keep ? 0 : profitAt(listPrice(), paid);
+        stats.buys++; addDaily(1); noteBuy(it.id, paid, b.name, false, ratingOf(it)); stats.spent += paid; stats.est += e; life.bought++; life.spent += paid; life.est += e; saveLife();
+        feed(b.name + ' won for ' + fmt(paid) + (keep ? '' : ' · +' + fmt(e)), 'hit'); celebrate(b.name, paid, keep ? null : e); render();
+        await afterBuy(it);
+        if (stats.buys >= buyCapNow()) return;
+      } else {
+        feed(b.name + ' lost' + (a.cur ? ' (went for ' + fmt(a.cur) + ')' : ''), 'miss');
+        if (it) { await sleep(rand(500, 1200)); await untargetItem(it); }
+      }
+    }
+  }
+
   async function runLoop() {
     while (running) {
       if (stats.buys >= buyCapNow()) return requestStop('stop limit reached (' + buyCapNow() + ' bought)');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (runLimitMin() > 0 && Date.now() - startTs > runLimitMin() * 60000) return requestStop('time limit (' + runLimitMin() + ' min)');
       if (!keepMode() && (!market.snipe || stats.sinceCheck >= nextCheckAt)) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
-      else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
+      else { if (bidMode()) await bidOnce(); else await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
     }
@@ -845,21 +911,21 @@
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     resolveName();
     if (keepMode()) {
-      var kmax = keepMaxNow(), kmin = keepMinNow();
+      var wc = webCrit(), kmax = bidMode() && wc && wc.maxBid > 0 ? Number(wc.maxBid) : keepMaxNow(), kmin = keepMinNow();
       if (!(kmax > 0)) { blockMsg = 'Transfer list / Unassigned mode: type a Max. Buy Now into the web app search, search once, then Start.'; render(); return; }
       if (kmin > kmax) { blockMsg = 'The Min. Buy Now is higher than the Max. Buy Now.'; render(); return; }
-      market.snipe = floorStep(kmax); running = true; phase = 'running';
-      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (webMaxBuy() ? ' (your web app search)' : ' (fallback from Settings)') + (kmin > 0 ? ' and ≥ ' + fmt(kmin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
+      market.snipe = floorStep(kmax); bids = {}; running = true; phase = 'running';
+      feed('Start ' + searchLabel() + (bidMode() ? ' · bids ≤ ' + fmt(bidMaxNow()) + ' on auctions ending within ' + (cfg.bidSecs || 90) + 's' : ' · buy ≤ ' + fmt(market.snipe)) + (webMaxBuy() || (wc && wc.maxBid > 0) ? ' (your web app search)' : ' (fallback from Settings)') + (kmin > 0 ? ' and ≥ ' + fmt(kmin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
       say('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe));
       render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
       return;
     }
-    running = true; phase = 'checking';
+    bids = {}; running = true; phase = 'checking';
     feed('Start ' + searchLabel() + ' · target +' + fmt(cfg.minProfit) + '/card', 'price');
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
 
-  function stopAll() { requestStop('stopped by you'); }
+  function stopAll() { var ob = typeof openBids === 'function' ? openBids() : 0; requestStop('stopped by you' + (ob ? ' · ' + ob + ' bid' + (ob > 1 ? 's' : '') + ' still running: won cards wait in your watchlist' : '')); }
   // Keeps lastBlock: the safety assistant still needs to know when EA last flagged you.
   function resetLife() { life = { bought: 0, spent: 0, est: 0, searches: 0, lastBlock: life.lastBlock || null }; saveLife(); sessions = []; lsSet(SESS_KEY, sessions); }
 
@@ -1512,7 +1578,7 @@
           '<div><span id="fs-l-prof">Profit</span><b id="fs-t-prof">—</b><small id="fs-t-profsub"></small></div>' +
         '</div></div>' +
       '<div class="sx-note" id="fs-t-sub"></div>' +
-      '<div class="sx-rows">' + speedRow() + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
+      '<div class="sx-rows">' + speedRow() + srow('fs-r-bid', ICON.coins, 'Buy with') + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
         srow('fs-r-after', ICON.box, 'After buying') + srow('fs-r-dur', ICON.clock, 'List for') + '</div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
@@ -1583,6 +1649,8 @@
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
+        segSetting('Buy with', 'bidMode', [['Buy Now', 0], ['Bids', 1]], 'Bids = bid on auctions about to end, one bid per card. Max bid: the web app search\u2019s Max. Bid (else Max. Buy Now), or the snipe price in List mode.') +
+        '<div id="fs-bidset">' + setting('Max open bids', ctlNum('bidCap'), 'Bids waiting for their auction to end.') + rangeSetting('Auctions ending within', 'bidSecs', 30, 180, 10, 's', '') + '</div>' +
         segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2], ['Custom', 3]], '') +
         setting('Search gap', stepper(), '<span id="fs-speedhint">' + speedHint() + '</span>')) +
       fold('Run &amp; breaks',
@@ -1848,6 +1916,7 @@
         case 'fs-sell': askSellPrice(); break;
         case 'fs-r-speed': cfg.speed = ((cfg.speed | 0) + 1) % 3; applySpeed(); save(); render(); break;
         case 'fs-r-when': if (running) break; var wt = window.prompt('Start at what time? (24 h, e.g. 22:30)\nLeave empty to start right away.', startAt || ''); if (wt != null) { wt = wt.trim().replace('.', ':'); if (!wt || startDelayMs(wt, new Date()) != null) { startAt = wt ? (wt.length === 4 ? '0' + wt : wt) : ''; blockMsg = ''; } else blockMsg = 'Type a time like 22:30.'; render(); } break;
+        case 'fs-r-bid': if (!running) { cfg.bidMode = cfg.bidMode ? 0 : 1; save(); render(); } break;
         case 'fs-r-after': cfg.afterBuy = ((cfg.afterBuy | 0) + 1) % 3; save(); render(); break;
         case 'fs-r-dur': var di = LIST_DURS.map(function (d) { return d[1]; }).indexOf(cfg.listDur); cfg.listDur = LIST_DURS[(di + 1) % LIST_DURS.length][1]; save(); render(); break;
         case 'fs-r-prof': var mp = window.prompt('Minimum profit per card (after EA’s 5% tax)', cfg.minProfit); if (mp != null) { var mv = parseCoins(mp); if (mv != null && mv >= 0) { cfg.minProfit = mv; save(); applySell(); } render(); } break;
@@ -1920,7 +1989,7 @@
     if (tab === 'market') return renderMarket($);
     var gl = panel.querySelectorAll('[data-gap]'); for (i = 0; i < gl.length; i++) if (gl[i].textContent !== gapLabel()) gl[i].textContent = gapLabel();
     if (tab === 'settings') {
-      if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
+      if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-bidset')) $('fs-bidset').style.display = cfg.bidMode ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
       var cu = panel.querySelectorAll('[data-cust]'); for (i = 0; i < cu.length; i++) cu[i].style.display = cfg[cu[i].getAttribute('data-cust')] ? '' : 'none';
       var au = panel.querySelectorAll('[data-auto]'); for (i = 0; i < au.length; i++) au[i].style.display = cfg[au[i].getAttribute('data-auto')] ? 'none' : '';
       if ($('fs-asum')) $('fs-asum').textContent = autoSummary();
@@ -1933,9 +2002,10 @@
     T('fs-t-kicker', keep ? 'Target · keep' : 'Target · list & flip');
     if ($('fs-t-name')) { T('fs-t-name', haveSearch() ? searchLabel() : 'No search yet'); $('fs-t-name').className = 'sx-name' + (haveSearch() ? '' : ' muted'); }
     T('fs-t-mode', !haveSearch() ? 'Search a player in the transfer market' : keep ? (cfg.afterBuy === 2 ? 'Bought cards stay in Unassigned' : 'Bought cards go to your transfer list') : 'Bought under the market, listed at the sell price');
-    T('fs-l-snipe', keep ? 'Buy under' : 'Snipe under');
-    T('fs-t-snipe', keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '—') : market.snipe ? fmt(market.snipe) : '—');
-    T('fs-t-price', keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
+    T('fs-l-snipe', bidMode() ? 'Bid up to' : keep ? 'Buy under' : 'Snipe under');
+    T('fs-t-snipe', keep ? (bidMode() ? (bidMaxNow() > 0 ? fmt(bidMaxNow()) : '—') : keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '—') : market.snipe ? fmt(market.snipe) : '—');
+    var wcb = webCrit(), webBid = wcb && wcb.maxBid > 0;
+    T('fs-t-price', keep && bidMode() ? (webBid ? 'Max. Bid · web app' : webMaxBuy() ? 'Max. Buy Now · web app' : keepMaxNow() ? 'fallback' : 'set in web app') : keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
     T('fs-l-sell', keep ? 'Min price' : 'Sell at');
     T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : market.price ? fmt(market.price) : 'Auto');
     T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : cfg.sellPrice > 0 ? 'your price' : 'Auto · market');
@@ -1943,8 +2013,9 @@
     T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
     T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
-    T('fs-t-sub', keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
+    T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
     T('fs-sell-v', cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto');
     T('fs-r-prof-v', fmt(cfg.minProfit));
@@ -1964,6 +2035,7 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = phase === 'waiting' ? 'Cancel<span class="sub">starts at ' + startAt + '</span>' : running ? 'Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
         : startAt ? 'Start at ' + startAt + '<span class="sub">waits, then ' + (keep ? 'snipes' : 'checks the price and snipes') + '</span>'
+        : bidMode() ? (keep ? 'Start Bidding' : 'Check Price &amp; Start Bidding') + '<span class="sub">' + (keep ? 'bids up to ' + (bidMaxNow() > 0 ? fmt(bidMaxNow()) : '?') : 'bids up to the snipe price') + ' · auctions ending within ' + (cfg.bidSecs || 90) + 's</span>'
         : keep ? 'Start Sniping<span class="sub">buys under ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + '</span>'
         : 'Check Price &amp; Start Sniping<span class="sub">' + (market.snipe ? 'snipes under ' + fmt(market.snipe) + ' · profit ' + fmt(pr != null ? pr : cfg.minProfit) + '+' : 'target profit ' + fmt(cfg.minProfit) + '+ per card') + '</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }

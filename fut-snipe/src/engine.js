@@ -18,9 +18,9 @@
     return wait(Math.max(HARD_FLOOR_MS, humanGapMs(cfg.gapMinMs, cfg.gapMaxMs, tempo.bias) * (slow ? 0.6 : 1)));
   }
   // A counted, paced search. null = the run stopped (captcha / 429 / Stop).
-  async function search(maxBuy, slow, minBuy, minBid) {
+  async function search(maxBuy, slow, minBuy, minBid, maxBid) {
     if (!(await pace(slow))) return null;
-    var r = await doSearch(maxBuy, minBuy, minBid); if (!running) return null;
+    var r = await doSearch(maxBuy, minBuy, minBid, maxBid); if (!running) return null;
     stats.searches++; stats.sinceBreak++; countSearch();
     if (!r.ok && (r.err || {}).stop) { requestStop(r.err.msg); return null; }
     if (!gotRange && r.items.length) { gotRange = true; priceLimits(r.items[0].it).then(function (lim) { if (lim) { stats.eaMin = lim.min; stats.eaMax = lim.max; render(); } }); }
@@ -178,13 +178,64 @@
     if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
   }
 
+  // ---------- Auto bidder: bid on auctions about to end, collect the won cards ----------
+  // Max bid: your web app search's Max. Bid (else its Max. Buy Now) in Transfer list / Unassigned
+  // mode, the checked snipe point in List mode. One bid per card, no bidding wars.
+  function bidMode() { return (cfg.bidMode | 0) === 1; }
+  function bidMaxNow() { if (!keepMode()) return market.snipe || 0; var c = webCrit(); return floorStep(c && c.maxBid > 0 ? Number(c.maxBid) : keepMaxNow()); }
+  var bids = {}; // id -> {it, amt, end, name}
+  function openBids() { return Object.keys(bids).length; }
+  async function bidOnce() {
+    var maxB = bidMaxNow(); if (!(maxB > 0)) return requestStop('no max bid: set a Max. Bid or Max. Buy Now in the web app search');
+    var room = Math.max(1, cfg.bidCap | 0) - openBids();
+    if (room > 0) {
+      var r = await search(0, false, 0, 0, maxB); if (!r) return;
+      if (!r.ok) { feed(searchLabel() + ' · search failed (' + ((r.err || {}).msg || '?') + ')', 'miss'); return; }
+      var rows = r.items.map(function (x) { var a = auctionOf(x.it); return { it: x.it, id: x.it.id, secs: x.secs, cur: a.cur, start: a.start, mine: a.bidState === 'highest' || !!bids[x.it.id] }; });
+      var picks = bidPick(rows, maxB, cfg.bidSecs || 90).slice(0, room), placed = 0;
+      for (var i = 0; i < picks.length && running; i++) {
+        var pk = picks[i], bal = coins();
+        if (bal != null && pk.bid > bal) { if (!cfg.cCoins) return requestStop('out of coins for bids (' + fmt(bal) + ' left)'); break; }
+        var b = await doBuy(pk.it, pk.bid); if (!running) return;
+        if (b.ok) { placed++; bids[pk.id] = { it: pk.it, amt: pk.bid, end: Date.now() + pk.secs * 1000, name: cardLabel(pk.it) }; feed('Bid ' + fmt(pk.bid) + ' on ' + cardLabel(pk.it) + ' · ends in ' + pk.secs + 's', 'check'); }
+        else { feed(cardLabel(pk.it) + ' bid ' + fmt(pk.bid) + ' · ' + ((b.err && b.err.msg) || 'failed'), 'miss'); if ((b.err || {}).stop) return requestStop(b.err.msg); }
+        await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
+      }
+      if (!placed) setActivity('Bidding ' + searchLabel() + ' ≤ ' + fmt(maxB) + ' · ' + openBids() + ' open bid' + (openBids() === 1 ? '' : 's'));
+    } else if (!(await pace(false))) return;
+    await settleBids();
+  }
+  // Ended auctions (+8 s): read the watchlist once, keep the won cards (list / move them like a
+  // bought card), remove the lost ones from the watchlist.
+  async function settleBids() {
+    var now = Date.now(), due = Object.keys(bids).filter(function (id) { return bids[id].end + 8000 < now; });
+    if (!due.length || !running) return;
+    var w = await watchedItems(); if (!w) { feed('Could not read the watchlist', 'miss'); return; }
+    var byId = {}; w.forEach(function (it) { byId[String(it.id)] = it; });
+    for (var i = 0; i < due.length && running; i++) {
+      var b = bids[due[i]], it = byId[String(due[i])], a = auctionOf(it);
+      if (it && a.tradeState === 'active') { b.end = Date.now() + 15000; continue; } // still running (EA extends near the end)
+      delete bids[due[i]];
+      if (it && a.bidState === 'highest') {
+        var paid = a.cur || b.amt, keep = keepMode(), e = keep ? 0 : profitAt(listPrice(), paid);
+        stats.buys++; addDaily(1); noteBuy(it.id, paid, b.name, false, ratingOf(it)); stats.spent += paid; stats.est += e; life.bought++; life.spent += paid; life.est += e; saveLife();
+        feed(b.name + ' won for ' + fmt(paid) + (keep ? '' : ' · +' + fmt(e)), 'hit'); celebrate(b.name, paid, keep ? null : e); render();
+        await afterBuy(it);
+        if (stats.buys >= buyCapNow()) return;
+      } else {
+        feed(b.name + ' lost' + (a.cur ? ' (went for ' + fmt(a.cur) + ')' : ''), 'miss');
+        if (it) { await sleep(rand(500, 1200)); await untargetItem(it); }
+      }
+    }
+  }
+
   async function runLoop() {
     while (running) {
       if (stats.buys >= buyCapNow()) return requestStop('stop limit reached (' + buyCapNow() + ' bought)');
       if (dailyCount() >= cfg.dailyBuyCap) return requestStop('daily cap reached (' + cfg.dailyBuyCap + ')');
       if (runLimitMin() > 0 && Date.now() - startTs > runLimitMin() * 60000) return requestStop('time limit (' + runLimitMin() + ' min)');
       if (!keepMode() && (!market.snipe || stats.sinceCheck >= nextCheckAt)) { if (market.snipe) feed('Re-checking the price…', 'check'); await checkPrice(); }
-      else { await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
+      else { if (bidMode()) await bidOnce(); else await snipeOnce(); stats.sinceCheck++; if (running) await hubPass(false); }
       render();
       await maybeBreak();
     }
@@ -219,20 +270,20 @@
     if (!haveServices()) { blockMsg = 'Trading services not found — open & sign into the FUT Web App.'; render(); return; }
     resolveName();
     if (keepMode()) {
-      var kmax = keepMaxNow(), kmin = keepMinNow();
+      var wc = webCrit(), kmax = bidMode() && wc && wc.maxBid > 0 ? Number(wc.maxBid) : keepMaxNow(), kmin = keepMinNow();
       if (!(kmax > 0)) { blockMsg = 'Transfer list / Unassigned mode: type a Max. Buy Now into the web app search, search once, then Start.'; render(); return; }
       if (kmin > kmax) { blockMsg = 'The Min. Buy Now is higher than the Max. Buy Now.'; render(); return; }
-      market.snipe = floorStep(kmax); running = true; phase = 'running';
-      feed('Start ' + searchLabel() + ' · buy ≤ ' + fmt(market.snipe) + (webMaxBuy() ? ' (your web app search)' : ' (fallback from Settings)') + (kmin > 0 ? ' and ≥ ' + fmt(kmin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
+      market.snipe = floorStep(kmax); bids = {}; running = true; phase = 'running';
+      feed('Start ' + searchLabel() + (bidMode() ? ' · bids ≤ ' + fmt(bidMaxNow()) + ' on auctions ending within ' + (cfg.bidSecs || 90) + 's' : ' · buy ≤ ' + fmt(market.snipe)) + (webMaxBuy() || (wc && wc.maxBid > 0) ? ' (your web app search)' : ' (fallback from Settings)') + (kmin > 0 ? ' and ≥ ' + fmt(kmin) : '') + ' · ' + (cfg.afterBuy === 2 ? 'leave in Unassigned' : 'to transfer list'), 'price');
       say('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe));
       render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
       return;
     }
-    running = true; phase = 'checking';
+    bids = {}; running = true; phase = 'checking';
     feed('Start ' + searchLabel() + ' · target +' + fmt(cfg.minProfit) + '/card', 'price');
     render(); runLoop().catch(function (e) { requestStop('loop error: ' + e); });
   }
 
-  function stopAll() { requestStop('stopped by you'); }
+  function stopAll() { var ob = typeof openBids === 'function' ? openBids() : 0; requestStop('stopped by you' + (ob ? ' · ' + ob + ' bid' + (ob > 1 ? 's' : '') + ' still running: won cards wait in your watchlist' : '')); }
   // Keeps lastBlock: the safety assistant still needs to know when EA last flagged you.
   function resetLife() { life = { bought: 0, spent: 0, est: 0, searches: 0, lastBlock: life.lastBlock || null }; saveLife(); sessions = []; lsSet(SESS_KEY, sessions); }

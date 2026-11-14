@@ -27,11 +27,11 @@
   function applyFields(t, s) { for (var k in s) { if (k !== '__fromUs' && s[k] !== undefined && s[k] !== '') { try { t[k] = s[k]; } catch (e) {} } } return t; }
   // The user's search (player, rarity, ...) but with OUR prices: their own max-buy / min-buy /
   // bid filters are dropped so they can't skew the price check. maxBuy 0 = no limit.
-  function buildCriteria(maxBuy, minBuy, minBid) {
+  function buildCriteria(maxBuy, minBuy, minBid, maxBid) {
     var out;
     if (capturedCriteria && !searchBase) out = Object.assign(Object.create(Object.getPrototypeOf(capturedCriteria)), capturedCriteria);
     else { var C = ctor(); var src = searchBase || capturedFromUrl || capturedPlain || { type: 'player', category: 'any', count: 50 }; out = C ? applyFields(new C(), src) : Object.assign({}, src); }
-    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = minBid > 0 ? minBid : 0; out.maxBid = 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
+    try { out.minBuy = minBuy > 0 ? minBuy : 0; out.minBid = minBid > 0 ? minBid : 0; out.maxBid = maxBid > 0 ? maxBid : 0; out.maxBuy = maxBuy > 0 ? maxBuy : 0; out.offset = 0; } catch (e) {}
     out.__fromUs = true; return out;
   }
   function haveSearch() { return !!(capturedCriteria || capturedFromUrl || capturedPlain); }
@@ -127,12 +127,12 @@
     return { stop: false, msg: 'request failed (' + code + ')' };
   }
   // One market search. Returns {ok, items: [{it, p, secs}] sorted cheapest first}.
-  function doSearch(maxBuy, minBuy, minBid) {
+  function doSearch(maxBuy, minBuy, minBid, maxBid) {
     return new Promise(function (resolve) {
       var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
       var to = setTimeout(function () { finish({ ok: false, items: [], err: { msg: 'search timeout' } }); }, 15000);
       try { try { svc().Item.clearTransferMarketCache(); } catch (e) {}
-        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy, minBid), 1).observe(OBS, function (sender, resp) {
+        svc().Item.searchTransferMarket(buildCriteria(maxBuy, minBuy, minBid, maxBid), 1).observe(OBS, function (sender, resp) {
           clearTimeout(to);
           var raw = (resp && ((resp.data && resp.data.items) || (resp.response && resp.response.items))) || [];
           var ok = !!(resp && (resp.success === true || (resp.success == null && resp.status != null && resp.status < 400) || raw.length));
@@ -196,6 +196,10 @@
     }
     return all;
   }
+  // Auto bidder: auction data of a card, the watchlist (cards you bid on), and removing a lost one.
+  function auctionOf(it) { var a = (it && it._auction) || {}; return { cur: a.currentBid | 0, start: a.startingBid | 0, bidState: a.bidState || null, tradeState: a.tradeState || null }; }
+  function watchedItems() { return new Promise(function (res) { var to = setTimeout(function () { res(null); }, 12000); try { if (!svc().Item.requestWatchedItems) return res(null); svc().Item.requestWatchedItems().observe(OBS, function (s, r) { clearTimeout(to); res(r && r.success ? ((r.data && r.data.items) || (r.response && r.response.items) || []) : null); }); } catch (e) { res(null); } }); }
+  function untargetItem(it) { return new Promise(function (res) { try { if (!svc().Item.untarget) return res(false); svc().Item.untarget([it]).observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function clearSold() { return new Promise(function (res) { try { if (!svc().Item.clearSoldItems) return res(false); svc().Item.clearSoldItems().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
   function relistAllExpired() { return new Promise(function (res) { try { if (!svc().Item.relistExpiredAuctions) return res(false); svc().Item.relistExpiredAuctions().observe(OBS, function (s, r) { res(!!(r && r.success)); }); } catch (e) { res(false); } }); }
 

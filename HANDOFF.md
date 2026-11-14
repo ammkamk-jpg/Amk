@@ -82,3 +82,9 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 - Hub › Auto relister (session only): while idle, every 4-7 min reads the transfer list, clears sold (per Settings) and relists expired at the old price (`relistExpiredAuctions`).
 - Hub › My Club: `services.Club.search` (UTSearchCriteriaDTO, type player, pages of 90, 10 s timeout) — unverified on the live web app; diagnostics now list `clubMethods`. Reuses the bulk-list view (`bulk.src = 'club'`), moves each card to the transfer list before listing, capped to free room.
 - Hub range tabs Today / 7 days / 30 days / All (`cfg.hubRange`, `rangeStart`); searches per local day in `futSnipe.searchDays` (40 days).
+
+### 5.4.0 – Auto bidder
+- Buy with: Buy Now / Bids (`cfg.bidMode`). Bids: search with `maxBid`, `bidPick` = auctions ending within `bidSecs` (default 90, not the last 3 s), next bid ≤ max bid, soonest first; at most `bidCap` open bids (default 5). One bid per card, no bidding wars.
+- Max bid: web search Max. Bid, else Max. Buy Now (keep modes); checked snipe price in List mode.
+- `settleBids`: 8 s after an auction ends, reads the watchlist once; won → counted like a buy, then `afterBuy` (list / move); lost → `untarget([item])`. Stop leaves open bids in the watchlist (said in the stop message).
+- `requestWatchedItems` / `untarget` signatures unverified on the live app.

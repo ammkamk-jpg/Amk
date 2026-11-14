@@ -87,7 +87,7 @@
           '<div><span id="fs-l-prof">Profit</span><b id="fs-t-prof">—</b><small id="fs-t-profsub"></small></div>' +
         '</div></div>' +
       '<div class="sx-note" id="fs-t-sub"></div>' +
-      '<div class="sx-rows">' + speedRow() + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
+      '<div class="sx-rows">' + speedRow() + srow('fs-r-bid', ICON.coins, 'Buy with') + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
         srow('fs-r-after', ICON.box, 'After buying') + srow('fs-r-dur', ICON.clock, 'List for') + '</div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
@@ -158,6 +158,8 @@
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
+        segSetting('Buy with', 'bidMode', [['Buy Now', 0], ['Bids', 1]], 'Bids = bid on auctions about to end, one bid per card. Max bid: the web app search\u2019s Max. Bid (else Max. Buy Now), or the snipe price in List mode.') +
+        '<div id="fs-bidset">' + setting('Max open bids', ctlNum('bidCap'), 'Bids waiting for their auction to end.') + rangeSetting('Auctions ending within', 'bidSecs', 30, 180, 10, 's', '') + '</div>' +
         segSetting('Speed', 'speed', [['Night', 0], ['Normal', 1], ['Turbo', 2], ['Custom', 3]], '') +
         setting('Search gap', stepper(), '<span id="fs-speedhint">' + speedHint() + '</span>')) +
       fold('Run &amp; breaks',
@@ -423,6 +425,7 @@
         case 'fs-sell': askSellPrice(); break;
         case 'fs-r-speed': cfg.speed = ((cfg.speed | 0) + 1) % 3; applySpeed(); save(); render(); break;
         case 'fs-r-when': if (running) break; var wt = window.prompt('Start at what time? (24 h, e.g. 22:30)\nLeave empty to start right away.', startAt || ''); if (wt != null) { wt = wt.trim().replace('.', ':'); if (!wt || startDelayMs(wt, new Date()) != null) { startAt = wt ? (wt.length === 4 ? '0' + wt : wt) : ''; blockMsg = ''; } else blockMsg = 'Type a time like 22:30.'; render(); } break;
+        case 'fs-r-bid': if (!running) { cfg.bidMode = cfg.bidMode ? 0 : 1; save(); render(); } break;
         case 'fs-r-after': cfg.afterBuy = ((cfg.afterBuy | 0) + 1) % 3; save(); render(); break;
         case 'fs-r-dur': var di = LIST_DURS.map(function (d) { return d[1]; }).indexOf(cfg.listDur); cfg.listDur = LIST_DURS[(di + 1) % LIST_DURS.length][1]; save(); render(); break;
         case 'fs-r-prof': var mp = window.prompt('Minimum profit per card (after EA’s 5% tax)', cfg.minProfit); if (mp != null) { var mv = parseCoins(mp); if (mv != null && mv >= 0) { cfg.minProfit = mv; save(); applySell(); } render(); } break;
@@ -495,7 +498,7 @@
     if (tab === 'market') return renderMarket($);
     var gl = panel.querySelectorAll('[data-gap]'); for (i = 0; i < gl.length; i++) if (gl[i].textContent !== gapLabel()) gl[i].textContent = gapLabel();
     if (tab === 'settings') {
-      if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
+      if ($('fs-keep')) $('fs-keep').style.display = keepMode() ? '' : 'none'; if ($('fs-bidset')) $('fs-bidset').style.display = cfg.bidMode ? '' : 'none'; if ($('fs-speedhint')) $('fs-speedhint').textContent = speedHint();
       var cu = panel.querySelectorAll('[data-cust]'); for (i = 0; i < cu.length; i++) cu[i].style.display = cfg[cu[i].getAttribute('data-cust')] ? '' : 'none';
       var au = panel.querySelectorAll('[data-auto]'); for (i = 0; i < au.length; i++) au[i].style.display = cfg[au[i].getAttribute('data-auto')] ? 'none' : '';
       if ($('fs-asum')) $('fs-asum').textContent = autoSummary();
@@ -508,9 +511,10 @@
     T('fs-t-kicker', keep ? 'Target · keep' : 'Target · list & flip');
     if ($('fs-t-name')) { T('fs-t-name', haveSearch() ? searchLabel() : 'No search yet'); $('fs-t-name').className = 'sx-name' + (haveSearch() ? '' : ' muted'); }
     T('fs-t-mode', !haveSearch() ? 'Search a player in the transfer market' : keep ? (cfg.afterBuy === 2 ? 'Bought cards stay in Unassigned' : 'Bought cards go to your transfer list') : 'Bought under the market, listed at the sell price');
-    T('fs-l-snipe', keep ? 'Buy under' : 'Snipe under');
-    T('fs-t-snipe', keep ? (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '—') : market.snipe ? fmt(market.snipe) : '—');
-    T('fs-t-price', keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
+    T('fs-l-snipe', bidMode() ? 'Bid up to' : keep ? 'Buy under' : 'Snipe under');
+    T('fs-t-snipe', keep ? (bidMode() ? (bidMaxNow() > 0 ? fmt(bidMaxNow()) : '—') : keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '—') : market.snipe ? fmt(market.snipe) : '—');
+    var wcb = webCrit(), webBid = wcb && wcb.maxBid > 0;
+    T('fs-t-price', keep && bidMode() ? (webBid ? 'Max. Bid · web app' : webMaxBuy() ? 'Max. Buy Now · web app' : keepMaxNow() ? 'fallback' : 'set in web app') : keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
     T('fs-l-sell', keep ? 'Min price' : 'Sell at');
     T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : market.price ? fmt(market.price) : 'Auto');
     T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : cfg.sellPrice > 0 ? 'your price' : 'Auto · market');
@@ -518,8 +522,9 @@
     T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
     T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
-    T('fs-t-sub', keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
+    T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
     T('fs-sell-v', cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto');
     T('fs-r-prof-v', fmt(cfg.minProfit));
@@ -539,6 +544,7 @@
       var cls = 'fs-btn ' + (running ? 'fs-stop' : 'fs-go'); if (go.className !== cls) go.className = cls;
       var html = phase === 'waiting' ? 'Cancel<span class="sub">starts at ' + startAt + '</span>' : running ? 'Stop<span class="sub">bought ' + stats.buys + ' · ' + stats.searches + ' searches</span>'
         : startAt ? 'Start at ' + startAt + '<span class="sub">waits, then ' + (keep ? 'snipes' : 'checks the price and snipes') + '</span>'
+        : bidMode() ? (keep ? 'Start Bidding' : 'Check Price &amp; Start Bidding') + '<span class="sub">' + (keep ? 'bids up to ' + (bidMaxNow() > 0 ? fmt(bidMaxNow()) : '?') : 'bids up to the snipe price') + ' · auctions ending within ' + (cfg.bidSecs || 90) + 's</span>'
         : keep ? 'Start Sniping<span class="sub">buys under ' + (keepMaxNow() > 0 ? fmt(floorStep(keepMaxNow())) : '?') + '</span>'
         : 'Check Price &amp; Start Sniping<span class="sub">' + (market.snipe ? 'snipes under ' + fmt(market.snipe) + ' · profit ' + fmt(pr != null ? pr : cfg.minProfit) + '+' : 'target profit ' + fmt(cfg.minProfit) + '+ per card') + '</span>';
       if (go.__html !== html) { go.__html = html; go.innerHTML = html; }
