@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.5.0
+// @version      5.5.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.5.0';
+  var VERSION = '5.5.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -1200,13 +1200,14 @@
   function loadFilter(i) { var f = filters[i]; if (!f || running) return; capturedFromUrl = Object.assign({ __fromUs: true }, f.crit); capturedCriteria = null; capturedPlain = Object.assign({}, f.crit); tab = 'snipe'; blockMsg = ''; log('loaded filter: ' + f.name); render(); }
   function deleteFilter(i) { filters.splice(i, 1); lsSet(FILT_KEY, filters); render(); }
 
+  var auctionHTML = null;
   function diag() {
-    try { var row = document.querySelector('li.listFUTItem, .listFUTItem'); if (row) lastCardHTML = row.outerHTML.slice(0, 2500); } catch (e) {}
+    try { var row = document.querySelector('li.listFUTItem, .listFUTItem'); if (row) { lastCardHTML = row.outerHTML.slice(0, 1500); var au = row.querySelector('.auction, [class*=auction]'); auctionHTML = au ? au.outerHTML.slice(0, 1500) : null; } } catch (e) {}
     var s = svc(), I = s && s.Item;
     var fnNames = function (o) { var out = {}; try { for (var p = o; p && p !== Object.prototype; p = Object.getPrototypeOf(p)) Object.getOwnPropertyNames(p).forEach(function (k) { try { if (k !== 'constructor' && typeof o[k] === 'function') out[k] = 1; } catch (e) {} }); } catch (e) {} return Object.keys(out).sort(); };
     var rows = document.querySelectorAll(ROW_SEL), withAvg = 0;
     for (var i = 0; i < rows.length; i++) if (parseCoins(avgLabelOf(rows[i])) > 0) withAvg++;
-    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], clubMethods: s && s.Club ? fnNames(s.Club) : [], cellHook: cellHook.cls, cellViews: Object.keys(window).filter(function (k) { return /^UT\w*(Cell|ListItem|ItemView|TableCell)\w*$/.test(k); }).slice(0, 40), rowsWithItem: document.querySelectorAll('[data-fs-id]').length, criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
+    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], clubMethods: s && s.Club ? fnNames(s.Club) : [], cellHook: cellHook, tpAlign: tpAlign, ledgerOpen: Object.keys(ledger.buys).length, ledgerSales: ledger.sales.length, cellViews: Object.keys(window).filter(function (k) { return /^UT\w*(TableCell|ListItem|Row|List)\w*$/.test(k); }).slice(0, 60), rowsWithItem: document.querySelectorAll('[data-fs-id]').length, rowsGuessed: [].filter.call(document.querySelectorAll(ROW_SEL), function (r) { return !!r.__fsGuess; }).length, criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, auctionHTML: auctionHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
     var text = 'TangaTolga Sniper diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -1229,27 +1230,69 @@
   // Profit tags on the transfer list: the row's item comes from EA's list cell view (its render()
   // is wrapped to remember the item on the row). Cost = what the bot paid (ledger), price = the
   // listing's Buy Now (or the sale price once sold). Cards the bot didn't buy get no tag.
-  var cellHook = { done: false, cls: null };
+  var cellHook = { done: false, cls: null, calls: 0, withItem: 0 };
   function hookCells() {
     if (cellHook.done) return true;
-    var names = ['UTItemTableCellView', 'UTItemTableCellViewWithChem', 'UTTransferListItemView'];
+    var names = ['UTItemTableCellView'].concat(Object.keys(window).filter(function (k) { return /^UT\w*(TableCell|ListItem)\w*View$/.test(k) && k !== 'UTItemTableCellView'; }));
     for (var i = 0; i < names.length; i++) {
       var C = window[names[i]]; if (!C || !C.prototype || typeof C.prototype.render !== 'function' || C.prototype.__fsHooked) continue;
       (function (P) {
         var orig = P.render;
         P.render = function (item) {
-          var r = orig.apply(this, arguments);
-          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); } } catch (e) {}
+          var r = orig.apply(this, arguments); cellHook.calls++;
+          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); cellHook.withItem++; } } catch (e) {}
           paintBadges(); return r;
         };
         P.__fsHooked = true;
       })(C.prototype);
-      cellHook.done = true; cellHook.cls = names[i];
+      cellHook.done = true; cellHook.cls = (cellHook.cls ? cellHook.cls + ',' : '') + names[i];
     }
     return cellHook.done;
   }
+  // Fallback when the hook finds nothing: the transfer list page shows exactly the items of
+  // requestTransferItems. Read them (at most every 45 s, only while such rows are on screen and
+  // the bot has buys on record), then line them up with the rows. A line-up is used only if every
+  // row's rating (and Buy Now, where the row shows one) matches its item.
+  var tpAlign = { at: 0, busy: false, n: 0, ok: false, tried: 0 };
+  function rowSig(row) {
+    var r = row.querySelector('.playerOverview .rating'), nums = [], vs = row.querySelectorAll('.auction .value, .auctionValue .value, .auction .currency-coins');
+    for (var i = 0; i < vs.length; i++) { var v = parseCoins(vs[i].textContent.trim()); if (v > 0) nums.push(v); }
+    return { rating: r ? Number(r.textContent.trim()) || null : null, nums: nums };
+  }
+  function sigMatch(sig, it) {
+    var rt = ratingOf(it); if (sig.rating && rt && sig.rating !== rt) return false;
+    var bn = (it._auction || {}).buyNowPrice; if (sig.nums.length && bn > 0 && sig.nums.indexOf(bn) < 0) return false;
+    return true;
+  }
+  function tpOrders(items) {
+    var by = { closed: [], expired: [], unlisted: [], active: [] };
+    items.forEach(function (it) { var s = tradeStateOf(it); by[s === 'closed' ? 'closed' : s === 'active' ? 'active' : isExpired(it) ? 'expired' : 'unlisted'].push(it); });
+    var act = by.active.slice().sort(function (a, b) { return (expiresOf(a) || 0) - (expiresOf(b) || 0); });
+    var out = [items];
+    [['closed', 'expired', 'unlisted', 'active'], ['closed', 'active', 'expired', 'unlisted'], ['closed', 'unlisted', 'expired', 'active'], ['active', 'expired', 'unlisted', 'closed']].forEach(function (o) {
+      out.push([].concat.apply([], o.map(function (k) { return by[k]; }))); out.push([].concat.apply([], o.map(function (k) { return k === 'active' ? act : by[k]; })));
+    });
+    return out;
+  }
+  function alignRows(rows) {
+    var open = Object.keys(ledger.buys).length; if (!open && !ledger.sales.length) return;
+    if (tpAlign.busy || (Date.now() - tpAlign.at < 45000 && tpAlign.n === rows.length)) return;
+    tpAlign.busy = true; tpAlign.at = Date.now(); tpAlign.n = rows.length; tpAlign.tried++;
+    transferItems().then(function (items) {
+      tpAlign.busy = false; tpAlign.ok = false;
+      if (!items || items.length !== rows.length) return;
+      var sigs = []; for (var i = 0; i < rows.length; i++) sigs.push(rowSig(rows[i]));
+      var cands = tpOrders(items);
+      for (var c = 0; c < cands.length; c++) {
+        var ok = true; for (var j = 0; j < rows.length && ok; j++) ok = sigMatch(sigs[j], cands[c][j]);
+        if (ok) { for (var k = 0; k < rows.length; k++) rows[k].__fsGuess = cands[c][k]; tpAlign.ok = true; break; }
+      }
+      paintBadges();
+    }, function () { tpAlign.busy = false; });
+  }
   function rowItem(row) {
     if (row.__fsItem) return row.__fsItem;
+    if (row.__fsGuess) return row.__fsGuess;
     var el = row.querySelector('[data-fs-id]') || (row.closest && row.closest('[data-fs-id]'));
     return el ? el.__fsItem || null : null;
   }
@@ -1294,7 +1337,9 @@
   function doPaintBadges() {
     if (badgeObs) badgeObs.disconnect();
     try {
-      var rows = document.querySelectorAll(ROW_SEL);
+      var rows = document.querySelectorAll(ROW_SEL), hooked = 0;
+      for (var h = 0; h < rows.length; h++) if (rows[h].__fsItem || rows[h].__fsGuess || rows[h].querySelector('[data-fs-id]')) hooked++;
+      if (rows.length && !hooked && rows.length <= 100) alignRows(rows);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i], host = row.querySelector('.rowContent') || row;
         var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;

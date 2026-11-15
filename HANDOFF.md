@@ -101,3 +101,6 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 - Sniper: Profit check (buy / sell typed in, live profit after 5%, max buy for the target, break-even).
 - Stats show the theoretical profit only: Sniper tiles Est. profit + Per card, lock screen Est. profit (no coins net).
 - Transfer list profit tags: wraps `UTItemTableCellView.prototype.render` (name unverified; diagnostics: cellHook, cellViews, rowsWithItem) to keep the item on the row; tag = listing Buy Now (or sale) after tax minus the bot's buy price, green / red. Sales now store the item id.
+
+### 5.5.1
+- Profit tags: the live app showed the `UTItemTableCellView` hook installed but no row with an item. Now hooks every `UT*TableCell*View/UT*ListItem*View` with a render, and as fallback lines up `requestTransferItems` with the rows (every 45 s max, only when rows == items and the ledger has entries; used only if every rating + shown Buy Now matches). Diagnostics: cellHook {calls, withItem}, tpAlign, ledgerOpen, rowsGuessed, auctionHTML.

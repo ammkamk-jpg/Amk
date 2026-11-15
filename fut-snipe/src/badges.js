@@ -14,27 +14,69 @@
   // Profit tags on the transfer list: the row's item comes from EA's list cell view (its render()
   // is wrapped to remember the item on the row). Cost = what the bot paid (ledger), price = the
   // listing's Buy Now (or the sale price once sold). Cards the bot didn't buy get no tag.
-  var cellHook = { done: false, cls: null };
+  var cellHook = { done: false, cls: null, calls: 0, withItem: 0 };
   function hookCells() {
     if (cellHook.done) return true;
-    var names = ['UTItemTableCellView', 'UTItemTableCellViewWithChem', 'UTTransferListItemView'];
+    var names = ['UTItemTableCellView'].concat(Object.keys(window).filter(function (k) { return /^UT\w*(TableCell|ListItem)\w*View$/.test(k) && k !== 'UTItemTableCellView'; }));
     for (var i = 0; i < names.length; i++) {
       var C = window[names[i]]; if (!C || !C.prototype || typeof C.prototype.render !== 'function' || C.prototype.__fsHooked) continue;
       (function (P) {
         var orig = P.render;
         P.render = function (item) {
-          var r = orig.apply(this, arguments);
-          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); } } catch (e) {}
+          var r = orig.apply(this, arguments); cellHook.calls++;
+          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); cellHook.withItem++; } } catch (e) {}
           paintBadges(); return r;
         };
         P.__fsHooked = true;
       })(C.prototype);
-      cellHook.done = true; cellHook.cls = names[i];
+      cellHook.done = true; cellHook.cls = (cellHook.cls ? cellHook.cls + ',' : '') + names[i];
     }
     return cellHook.done;
   }
+  // Fallback when the hook finds nothing: the transfer list page shows exactly the items of
+  // requestTransferItems. Read them (at most every 45 s, only while such rows are on screen and
+  // the bot has buys on record), then line them up with the rows. A line-up is used only if every
+  // row's rating (and Buy Now, where the row shows one) matches its item.
+  var tpAlign = { at: 0, busy: false, n: 0, ok: false, tried: 0 };
+  function rowSig(row) {
+    var r = row.querySelector('.playerOverview .rating'), nums = [], vs = row.querySelectorAll('.auction .value, .auctionValue .value, .auction .currency-coins');
+    for (var i = 0; i < vs.length; i++) { var v = parseCoins(vs[i].textContent.trim()); if (v > 0) nums.push(v); }
+    return { rating: r ? Number(r.textContent.trim()) || null : null, nums: nums };
+  }
+  function sigMatch(sig, it) {
+    var rt = ratingOf(it); if (sig.rating && rt && sig.rating !== rt) return false;
+    var bn = (it._auction || {}).buyNowPrice; if (sig.nums.length && bn > 0 && sig.nums.indexOf(bn) < 0) return false;
+    return true;
+  }
+  function tpOrders(items) {
+    var by = { closed: [], expired: [], unlisted: [], active: [] };
+    items.forEach(function (it) { var s = tradeStateOf(it); by[s === 'closed' ? 'closed' : s === 'active' ? 'active' : isExpired(it) ? 'expired' : 'unlisted'].push(it); });
+    var act = by.active.slice().sort(function (a, b) { return (expiresOf(a) || 0) - (expiresOf(b) || 0); });
+    var out = [items];
+    [['closed', 'expired', 'unlisted', 'active'], ['closed', 'active', 'expired', 'unlisted'], ['closed', 'unlisted', 'expired', 'active'], ['active', 'expired', 'unlisted', 'closed']].forEach(function (o) {
+      out.push([].concat.apply([], o.map(function (k) { return by[k]; }))); out.push([].concat.apply([], o.map(function (k) { return k === 'active' ? act : by[k]; })));
+    });
+    return out;
+  }
+  function alignRows(rows) {
+    var open = Object.keys(ledger.buys).length; if (!open && !ledger.sales.length) return;
+    if (tpAlign.busy || (Date.now() - tpAlign.at < 45000 && tpAlign.n === rows.length)) return;
+    tpAlign.busy = true; tpAlign.at = Date.now(); tpAlign.n = rows.length; tpAlign.tried++;
+    transferItems().then(function (items) {
+      tpAlign.busy = false; tpAlign.ok = false;
+      if (!items || items.length !== rows.length) return;
+      var sigs = []; for (var i = 0; i < rows.length; i++) sigs.push(rowSig(rows[i]));
+      var cands = tpOrders(items);
+      for (var c = 0; c < cands.length; c++) {
+        var ok = true; for (var j = 0; j < rows.length && ok; j++) ok = sigMatch(sigs[j], cands[c][j]);
+        if (ok) { for (var k = 0; k < rows.length; k++) rows[k].__fsGuess = cands[c][k]; tpAlign.ok = true; break; }
+      }
+      paintBadges();
+    }, function () { tpAlign.busy = false; });
+  }
   function rowItem(row) {
     if (row.__fsItem) return row.__fsItem;
+    if (row.__fsGuess) return row.__fsGuess;
     var el = row.querySelector('[data-fs-id]') || (row.closest && row.closest('[data-fs-id]'));
     return el ? el.__fsItem || null : null;
   }
@@ -79,7 +121,9 @@
   function doPaintBadges() {
     if (badgeObs) badgeObs.disconnect();
     try {
-      var rows = document.querySelectorAll(ROW_SEL);
+      var rows = document.querySelectorAll(ROW_SEL), hooked = 0;
+      for (var h = 0; h < rows.length; h++) if (rows[h].__fsItem || rows[h].__fsGuess || rows[h].querySelector('[data-fs-id]')) hooked++;
+      if (rows.length && !hooked && rows.length <= 100) alignRows(rows);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i], host = row.querySelector('.rowContent') || row;
         var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;
