@@ -150,6 +150,10 @@
     '#fs-fab svg{width:24px;height:24px}#fs-fab.glide{transition:left .45s cubic-bezier(.22,1,.36,1),top .45s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.08)}' +
     '#fs-fab .dot{position:absolute;top:3px;right:3px;width:13px;height:13px;border-radius:50%;background:' + C_OK + ';border:2px solid ' + C_BG + ';display:none}#fs-fab.run .dot{display:block}' +
     // price tag on cards
+    '.sx-calc{background:' + C_CARD + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:14px 16px;margin:12px 0}.sx-calc .row{display:flex;gap:10px;margin-top:8px}.sx-calc label{flex:1;min-width:0;font-size:12px;color:' + C_MUT + ';display:flex;flex-direction:column;gap:5px}' +
+    '.sx-calc .fs-num{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;margin:0!important;text-align:left;-webkit-appearance:none}' +
+    '.sx-calc .res{margin-top:10px;font-size:13px;color:' + C_MUT + ';line-height:1.4}.sx-calc .res b{display:block;font-size:24px;font-weight:800;margin:2px 0;' + NUM + '}.sx-calc .res span{display:block;font-size:12px}.sx-calc .res.g b{color:' + C_OK + '}.sx-calc .res.r b{color:' + C_RED + '}' +
+    '.fs-badge.pf{border-color:rgba(74,222,128,.6);color:' + C_OK + '}.fs-badge.pf.neg{border-color:rgba(248,113,113,.6);color:' + C_RED + '}' +
     '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:1px 8px;border-radius:999px;background:rgba(18,23,34,.94);border:1px solid rgba(90,200,245,.5);color:#fff;font:700 11px/1.5 ' + FONT + ';' + NUM + 'white-space:nowrap;pointer-events:none}' +
     // running screen
     '#fs-lock{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:max(20px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));background:rgba(18,23,34,.97);color:' + C_TXT + ';font:15px/1.4 ' + FONT + ';text-align:center;-webkit-font-smoothing:antialiased}' +

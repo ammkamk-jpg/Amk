@@ -77,6 +77,19 @@
     return '<div class="fs-set"><div class="top"><div class="nm">' + name + '</div>' + ctlSeg(flag, [['Auto', 0], ['Custom', 1]]) + '</div>' +
       '<div class="ds" data-auto="' + flag + '">' + autoText + '</div><div class="fs-cust" data-cust="' + flag + '">' + custom + '</div></div>';
   }
+  // Profit check: buy / sell price typed in -> profit after EA's 5% tax, live. Empty fields
+  // show the current run's numbers (snipe price, sell price).
+  function calcProfit() {
+    var bi = document.getElementById('fs-pc-buy'), si = document.getElementById('fs-pc-sell'), out = document.getElementById('fs-pc-res'); if (!bi || !si || !out) return;
+    var buy = parseCoins(bi.value) || 0, sell = parseCoins(si.value) || 0;
+    bi.placeholder = market.snipe ? String(market.snipe) : '125000'; si.placeholder = listPrice() ? String(listPrice()) : '129000';
+    if (!buy) buy = market.snipe || 0; if (!sell) sell = listPrice() || 0;
+    if (!(buy > 0 && sell > 0)) { out.innerHTML = 'Type a price: the profit after EA\u2019s 5% shows right away.'; out.className = 'res'; return; }
+    var p = profitAt(sell, buy), maxBuy = snipePoint(sell, cfg.minProfit);
+    out.innerHTML = 'Buy ' + fmt(buy) + ' → sell ' + fmt(sell) + ' (you get ' + fmt(afterTax(sell)) + ')<b>' + (p >= 0 ? '+' : '−') + fmt(Math.abs(p)) + '</b>' +
+      '<span>For +' + fmt(cfg.minProfit) + ' buy at most ' + (maxBuy ? fmt(maxBuy) : '—') + ' · break-even ' + fmt(afterTax(sell)) + '</span>';
+    out.className = 'res ' + (p >= 0 ? 'g' : 'r');
+  }
   function autoSummary() { var n = ['cRun', 'cCap', 'cCoins', 'cBreaks'].filter(function (k) { return cfg[k]; }).length; return n ? n + ' custom' : 'Auto'; }
   function sniperView() {
     var srow = function (id, ic, label) { return '<button class="sx-row" id="' + id + '"><span class="ic">' + ic + '</span><span class="k">' + label + '</span><span class="v" id="' + id + '-v"></span><span class="chev"></span></button>'; };
@@ -90,11 +103,15 @@
           '<div><span id="fs-l-prof">Profit</span><b id="fs-t-prof">—</b><small id="fs-t-profsub"></small></div>' +
         '</div></div>' +
       '<div class="sx-note" id="fs-t-sub"></div>' +
+      '<div class="sx-calc"><div class="sx-k">Profit check</div><div class="row">' +
+        '<label>Buy at<input class="fs-num" id="fs-pc-buy" type="text" inputmode="numeric" placeholder="125000"></label>' +
+        '<label>Sell at<input class="fs-num" id="fs-pc-sell" type="text" inputmode="numeric" placeholder="129000"></label></div>' +
+        '<div class="res" id="fs-pc-res">Type a price: the profit after EA\u2019s 5% shows right away.</div></div>' +
       '<div class="sx-rows">' + speedRow() + srow('fs-r-bid', ICON.coins, 'Buy with') + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
         srow('fs-r-after', ICON.box, 'After buying') + srow('fs-r-dur', ICON.clock, 'List for') + '</div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
-      '<div class="sx-stats">' + stat('fs-s-buys', 'Bought') + stat('fs-s-sr', 'Searches') + stat('fs-s-est', 'Est. profit') + stat('fs-s-net', 'Coins net') + '</div>' +
+      '<div class="sx-stats">' + stat('fs-s-buys', 'Bought') + stat('fs-s-sr', 'Searches') + stat('fs-s-est', 'Est. profit') + stat('fs-s-net', 'Per card') + '</div>' +
       '<div class="fs-feed"></div>' +
       '<div class="ios-h"></div>' +
       fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? String(filters.length) : '') +
@@ -395,7 +412,7 @@
     var lock = document.createElement('div'); lock.id = 'fs-lock';
     lock.innerHTML = '<div class="lspin"></div><div class="lbig">Running</div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
-      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
+      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Est. profit<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
       '<div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
@@ -407,6 +424,7 @@
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
 
     // live label while dragging a slider
+    el.addEventListener('input', function (e) { if (e.target && /^fs-pc-/.test(e.target.id || '')) { e.target.__typed = true; calcProfit(); } });
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) {
       var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
@@ -473,7 +491,7 @@
         if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(listPrice(), market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
-        var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
+        if ($('fs-l-net')) { $('fs-l-net').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-l-net').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
       } else {
         lock.classList.remove('show');
         if (fb && !panel.classList.contains('open')) fb.style.display = '';
@@ -528,6 +546,7 @@
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
     T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
     T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    calcProfit();
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
     T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
@@ -539,7 +558,7 @@
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
     if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
     if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
-    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = net != null && net < 0 ? 'r' : net ? 'g' : ''; }
+    var pcard = stats.buys ? Math.round(stats.est / stats.buys) : null; if ($('fs-s-net')) { $('fs-s-net').textContent = pcard == null ? '—' : signed(pcard); $('fs-s-net').className = pcard != null && pcard < 0 ? 'r' : pcard ? 'g' : ''; }
     var fl = $('fs-filters'), fh = filtersHTML(); if (fl && fl.__html !== fh) { fl.__html = fh; fl.innerHTML = fh; }
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
     if ($('fs-act')) $('fs-act').textContent = activity;
@@ -563,6 +582,7 @@
   setInterval(function () { if ((tab === 'hub' || tab === 'market') && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
   function boot(tries) {
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
+    hookCells();
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
     if ((tries || 0) < 180) setTimeout(function () { boot((tries || 0) + 1); }, 1000);
   }

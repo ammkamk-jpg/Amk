@@ -96,3 +96,8 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 ### 5.4.2
 - Profit counts from your sell price by default (`cfg.snipeFrom` 1; 0 = old "lower of sell / market").
 - Profit tolerance `cfg.profitTol` (0/10/20/30 %): on 1,000-coin steps picks the step closest to the target if its profit is >= target*(1-tol).
+
+### 5.5.0
+- Sniper: Profit check (buy / sell typed in, live profit after 5%, max buy for the target, break-even).
+- Stats show the theoretical profit only: Sniper tiles Est. profit + Per card, lock screen Est. profit (no coins net).
+- Transfer list profit tags: wraps `UTItemTableCellView.prototype.render` (name unverified; diagnostics: cellHook, cellViews, rowsWithItem) to keep the item on the row; tag = listing Buy Now (or sale) after tax minus the bot's buy price, green / red. Sales now store the item id.

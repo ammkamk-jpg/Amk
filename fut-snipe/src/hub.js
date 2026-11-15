@@ -20,7 +20,7 @@
       var id = String(it.id); if (ledger.booked[id]) return;
       var sold = salePriceOf(it); if (!(sold > 0)) return;
       var b = ledger.buys[id], buy = b ? b.buy : null, profit = buy != null ? profitAt(sold, buy) : null, name = nameOf(it) || (b && b.name) || 'Card';
-      ledger.sales.unshift({ t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
+      ledger.sales.unshift({ id: id, t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
       ledger.booked[id] = 1; delete ledger.buys[id]; n++;
       feed(name + ' sold for ' + fmt(sold) + (profit != null ? ' · ' + signed(profit) : ''), 'hit');
     });

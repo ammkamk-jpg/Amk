@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.4.2
+// @version      5.5.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.4.2';
+  var VERSION = '5.5.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -968,7 +968,7 @@
       var id = String(it.id); if (ledger.booked[id]) return;
       var sold = salePriceOf(it); if (!(sold > 0)) return;
       var b = ledger.buys[id], buy = b ? b.buy : null, profit = buy != null ? profitAt(sold, buy) : null, name = nameOf(it) || (b && b.name) || 'Card';
-      ledger.sales.unshift({ t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
+      ledger.sales.unshift({ id: id, t: Date.now(), name: name, rating: ratingOf(it) || (b && b.rating) || null, buy: buy, sold: sold, profit: profit, pack: !!(b && b.pack) });
       ledger.booked[id] = 1; delete ledger.buys[id]; n++;
       feed(name + ' sold for ' + fmt(sold) + (profit != null ? ' · ' + signed(profit) : ''), 'hit');
     });
@@ -1206,7 +1206,7 @@
     var fnNames = function (o) { var out = {}; try { for (var p = o; p && p !== Object.prototype; p = Object.getPrototypeOf(p)) Object.getOwnPropertyNames(p).forEach(function (k) { try { if (k !== 'constructor' && typeof o[k] === 'function') out[k] = 1; } catch (e) {} }); } catch (e) {} return Object.keys(out).sort(); };
     var rows = document.querySelectorAll(ROW_SEL), withAvg = 0;
     for (var i = 0; i < rows.length; i++) if (parseCoins(avgLabelOf(rows[i])) > 0) withAvg++;
-    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], clubMethods: s && s.Club ? fnNames(s.Club) : [], criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
+    var d = { version: VERSION, servicesFound: !!s, services: s ? Object.keys(s).sort() : [], itemMethods: I ? fnNames(I) : [], clubMethods: s && s.Club ? fnNames(s.Club) : [], cellHook: cellHook.cls, cellViews: Object.keys(window).filter(function (k) { return /^UT\w*(Cell|ListItem|ItemView|TableCell)\w*$/.test(k); }).slice(0, 40), rowsWithItem: document.querySelectorAll('[data-fs-id]').length, criteriaCtor: !!ctor(), userReadable: coins() != null, capturedCriteria: !!capturedCriteria, capturedPlain: capturedPlain, phase: phase, market: market, minProfit: cfg.minProfit, listDur: cfg.listDur, speed: cfg.speed, reprobeEvery: cfg.reprobeEvery, cheapest: stats.cheapest, curName: curName, curDefId: stats.curDefId, eaMin: stats.eaMin, eaMax: stats.eaMax, sessionNet: sessionNet(), lifetime: life, filtersSaved: filters.length, sessionsLogged: sessions.length, cardRows: rows.length, cardRowsWithAvg: withAvg, firstAvg: rows.length ? avgLabelOf(rows[0]) : null, badgesPainted: document.querySelectorAll('.fs-badge').length, lastBuy: lastBuy, sampleItemKeys: sampleKeys.slice(0, 40), samplePrice: samplePrice, marketCardHTML: lastCardHTML, recentMarketUrls: tmUrls, stopReason: stopReason, priceLimitsResponse: limitsDebug, priceLimitsCached: Object.keys(limitsCache).length, hub: { at: hub.at, total: hub.total, sold: hub.sold, expired: hub.expired }, settings: { afterBuy: cfg.afterBuy, repriceExpired: cfg.repriceExpired, relistExpired: cfg.relistExpired, clearSold: cfg.clearSold, varyMinBid: cfg.varyMinBid, tooManyStop: cfg.tooManyStop, rangeStop: cfg.rangeStop, keepSpecials: cfg.keepSpecials } };
     var text = 'TangaTolga Sniper diagnostics\n' + JSON.stringify(d, null, 2);
     try { navigator.clipboard.writeText(text); log('diagnostics copied'); } catch (e) { log('clipboard blocked — see console'); }
     try { console.log(text); } catch (e) {}
@@ -1226,6 +1226,51 @@
     window.addEventListener('resize', paintBadges);
   }
   function paintBadges() { if (!cfg.badges || badgeTimer) return; badgeTimer = setTimeout(function () { badgeTimer = null; doPaintBadges(); }, 300); }
+  // Profit tags on the transfer list: the row's item comes from EA's list cell view (its render()
+  // is wrapped to remember the item on the row). Cost = what the bot paid (ledger), price = the
+  // listing's Buy Now (or the sale price once sold). Cards the bot didn't buy get no tag.
+  var cellHook = { done: false, cls: null };
+  function hookCells() {
+    if (cellHook.done) return true;
+    var names = ['UTItemTableCellView', 'UTItemTableCellViewWithChem', 'UTTransferListItemView'];
+    for (var i = 0; i < names.length; i++) {
+      var C = window[names[i]]; if (!C || !C.prototype || typeof C.prototype.render !== 'function' || C.prototype.__fsHooked) continue;
+      (function (P) {
+        var orig = P.render;
+        P.render = function (item) {
+          var r = orig.apply(this, arguments);
+          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); } } catch (e) {}
+          paintBadges(); return r;
+        };
+        P.__fsHooked = true;
+      })(C.prototype);
+      cellHook.done = true; cellHook.cls = names[i];
+    }
+    return cellHook.done;
+  }
+  function rowItem(row) {
+    if (row.__fsItem) return row.__fsItem;
+    var el = row.querySelector('[data-fs-id]') || (row.closest && row.closest('[data-fs-id]'));
+    return el ? el.__fsItem || null : null;
+  }
+  // {profit, sold} for a row's card, or null (unknown cost / no price).
+  function rowProfit(it) {
+    if (!it || it.id == null) return null;
+    var id = String(it.id), b = ledger.buys[id];
+    if (b) { var a = it._auction || {}, price = tradeStateOf(it) === 'closed' ? salePriceOf(it) : (a.buyNowPrice > 0 ? a.buyNowPrice : b.list); return price > 0 ? { profit: profitAt(price, b.buy), price: price } : null; }
+    for (var i = 0; i < ledger.sales.length && i < 300; i++) if (ledger.sales[i].id === id && ledger.sales[i].profit != null) return { profit: ledger.sales[i].profit, price: ledger.sales[i].sold, sold: true };
+    return null;
+  }
+  function paintProfitTag(host, card, it) {
+    var t = host.querySelector('.fs-badge.pf'), rp = rowProfit(it);
+    if (!rp) { if (t) t.parentNode.removeChild(t); return; }
+    if (!t) { t = document.createElement('div'); t.className = 'fs-badge pf'; host.appendChild(t); }
+    var text = (rp.profit >= 0 ? '+' : '−') + fmt(Math.abs(rp.profit)), cls = 'fs-badge pf' + (rp.profit < 0 ? ' neg' : '');
+    if (t.textContent !== text) t.textContent = text; if (t.className !== cls) t.className = cls;
+    var hr = host.getBoundingClientRect(), cr = card.getBoundingClientRect(); if (!cr.width || !hr.width) return;
+    var left = Math.round(Math.max(2, cr.left - hr.left + cr.width / 2 - t.offsetWidth / 2)) + 'px', top = Math.round(Math.max(0, cr.top - hr.top - t.offsetHeight * 0.4)) + 'px';
+    if (t.style.left !== left) t.style.left = left; if (t.style.top !== top) t.style.top = top;
+  }
   function removeBadges() { try { var b = document.querySelectorAll('.fs-badge'); for (var i = 0; i < b.length; i++) b[i].parentNode && b[i].parentNode.removeChild(b[i]); } catch (e) {} }
   // The "AVG" row of the card's stats view, e.g. "61.3K".
   function avgLabelOf(row) {
@@ -1253,7 +1298,9 @@
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i], host = row.querySelector('.rowContent') || row;
         var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;
-        var label = avgLabelOf(row), b = host.querySelector('.fs-badge');
+        try { if (window.getComputedStyle(host).position === 'static') host.style.position = 'relative'; } catch (e) {}
+        paintProfitTag(host, card, rowItem(row));
+        var label = avgLabelOf(row), b = host.querySelector('.fs-badge:not(.pf)');
         if (!(parseCoins(label) > 0)) { if (b) b.parentNode.removeChild(b); continue; }
         var text = '≈ ' + label;
         if (!b) {
@@ -1483,6 +1530,10 @@
     '#fs-fab svg{width:24px;height:24px}#fs-fab.glide{transition:left .45s cubic-bezier(.22,1,.36,1),top .45s cubic-bezier(.22,1,.36,1)}#fs-fab.drag{transform:scale(1.08)}' +
     '#fs-fab .dot{position:absolute;top:3px;right:3px;width:13px;height:13px;border-radius:50%;background:' + C_OK + ';border:2px solid ' + C_BG + ';display:none}#fs-fab.run .dot{display:block}' +
     // price tag on cards
+    '.sx-calc{background:' + C_CARD + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:14px 16px;margin:12px 0}.sx-calc .row{display:flex;gap:10px;margin-top:8px}.sx-calc label{flex:1;min-width:0;font-size:12px;color:' + C_MUT + ';display:flex;flex-direction:column;gap:5px}' +
+    '.sx-calc .fs-num{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;margin:0!important;text-align:left;-webkit-appearance:none}' +
+    '.sx-calc .res{margin-top:10px;font-size:13px;color:' + C_MUT + ';line-height:1.4}.sx-calc .res b{display:block;font-size:24px;font-weight:800;margin:2px 0;' + NUM + '}.sx-calc .res span{display:block;font-size:12px}.sx-calc .res.g b{color:' + C_OK + '}.sx-calc .res.r b{color:' + C_RED + '}' +
+    '.fs-badge.pf{border-color:rgba(74,222,128,.6);color:' + C_OK + '}.fs-badge.pf.neg{border-color:rgba(248,113,113,.6);color:' + C_RED + '}' +
     '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:1px 8px;border-radius:999px;background:rgba(18,23,34,.94);border:1px solid rgba(90,200,245,.5);color:#fff;font:700 11px/1.5 ' + FONT + ';' + NUM + 'white-space:nowrap;pointer-events:none}' +
     // running screen
     '#fs-lock{position:fixed;inset:0;z-index:2147483647;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:max(20px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));background:rgba(18,23,34,.97);color:' + C_TXT + ';font:15px/1.4 ' + FONT + ';text-align:center;-webkit-font-smoothing:antialiased}' +
@@ -1588,6 +1639,19 @@
     return '<div class="fs-set"><div class="top"><div class="nm">' + name + '</div>' + ctlSeg(flag, [['Auto', 0], ['Custom', 1]]) + '</div>' +
       '<div class="ds" data-auto="' + flag + '">' + autoText + '</div><div class="fs-cust" data-cust="' + flag + '">' + custom + '</div></div>';
   }
+  // Profit check: buy / sell price typed in -> profit after EA's 5% tax, live. Empty fields
+  // show the current run's numbers (snipe price, sell price).
+  function calcProfit() {
+    var bi = document.getElementById('fs-pc-buy'), si = document.getElementById('fs-pc-sell'), out = document.getElementById('fs-pc-res'); if (!bi || !si || !out) return;
+    var buy = parseCoins(bi.value) || 0, sell = parseCoins(si.value) || 0;
+    bi.placeholder = market.snipe ? String(market.snipe) : '125000'; si.placeholder = listPrice() ? String(listPrice()) : '129000';
+    if (!buy) buy = market.snipe || 0; if (!sell) sell = listPrice() || 0;
+    if (!(buy > 0 && sell > 0)) { out.innerHTML = 'Type a price: the profit after EA\u2019s 5% shows right away.'; out.className = 'res'; return; }
+    var p = profitAt(sell, buy), maxBuy = snipePoint(sell, cfg.minProfit);
+    out.innerHTML = 'Buy ' + fmt(buy) + ' → sell ' + fmt(sell) + ' (you get ' + fmt(afterTax(sell)) + ')<b>' + (p >= 0 ? '+' : '−') + fmt(Math.abs(p)) + '</b>' +
+      '<span>For +' + fmt(cfg.minProfit) + ' buy at most ' + (maxBuy ? fmt(maxBuy) : '—') + ' · break-even ' + fmt(afterTax(sell)) + '</span>';
+    out.className = 'res ' + (p >= 0 ? 'g' : 'r');
+  }
   function autoSummary() { var n = ['cRun', 'cCap', 'cCoins', 'cBreaks'].filter(function (k) { return cfg[k]; }).length; return n ? n + ' custom' : 'Auto'; }
   function sniperView() {
     var srow = function (id, ic, label) { return '<button class="sx-row" id="' + id + '"><span class="ic">' + ic + '</span><span class="k">' + label + '</span><span class="v" id="' + id + '-v"></span><span class="chev"></span></button>'; };
@@ -1601,11 +1665,15 @@
           '<div><span id="fs-l-prof">Profit</span><b id="fs-t-prof">—</b><small id="fs-t-profsub"></small></div>' +
         '</div></div>' +
       '<div class="sx-note" id="fs-t-sub"></div>' +
+      '<div class="sx-calc"><div class="sx-k">Profit check</div><div class="row">' +
+        '<label>Buy at<input class="fs-num" id="fs-pc-buy" type="text" inputmode="numeric" placeholder="125000"></label>' +
+        '<label>Sell at<input class="fs-num" id="fs-pc-sell" type="text" inputmode="numeric" placeholder="129000"></label></div>' +
+        '<div class="res" id="fs-pc-res">Type a price: the profit after EA\u2019s 5% shows right away.</div></div>' +
       '<div class="sx-rows">' + speedRow() + srow('fs-r-bid', ICON.coins, 'Buy with') + srow('fs-r-when', ICON.play, 'Start') + srow('fs-sell', ICON.tag, 'Sell price') + srow('fs-r-prof', ICON.target, 'Minimum profit') +
         srow('fs-r-after', ICON.box, 'After buying') + srow('fs-r-dur', ICON.clock, 'List for') + '</div>' +
       '<button class="fs-btn fs-go" id="fs-start"></button>' +
       '<div id="fs-act"></div>' +
-      '<div class="sx-stats">' + stat('fs-s-buys', 'Bought') + stat('fs-s-sr', 'Searches') + stat('fs-s-est', 'Est. profit') + stat('fs-s-net', 'Coins net') + '</div>' +
+      '<div class="sx-stats">' + stat('fs-s-buys', 'Bought') + stat('fs-s-sr', 'Searches') + stat('fs-s-est', 'Est. profit') + stat('fs-s-net', 'Per card') + '</div>' +
       '<div class="fs-feed"></div>' +
       '<div class="ios-h"></div>' +
       fold('Saved searches', '<div id="fs-filters"></div><button class="fs-more" id="fs-savefilter">Save the current market search</button>', filters.length ? String(filters.length) : '') +
@@ -1906,7 +1974,7 @@
     var lock = document.createElement('div'); lock.id = 'fs-lock';
     lock.innerHTML = '<div class="lspin"></div><div class="lbig">Running</div>' +
       '<div class="lstat" id="fs-l-act">Checking price…</div>' +
-      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Coins net<b id="fs-l-net">—</b></div></div>' +
+      '<div class="lrow"><div>Bought<b id="fs-l-buys">0</b></div><div>Searches<b id="fs-l-sr">0</b></div><div class="pf">Profit/card<b id="fs-l-pf">—</b></div><div>Est. profit<b id="fs-l-net">—</b></div></div>' +
       '<div class="lsub" id="fs-l-sub"></div>' +
       '<div class="fs-feed"></div>' +
       '<div class="lbtns"><button id="fs-lstop">Stop</button><button id="fs-lhide">Hide</button></div>';
@@ -1918,6 +1986,7 @@
     lock.querySelector('#fs-lhide').onclick = function () { lockHidden = true; render(); };
 
     // live label while dragging a slider
+    el.addEventListener('input', function (e) { if (e.target && /^fs-pc-/.test(e.target.id || '')) { e.target.__typed = true; calcProfit(); } });
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) {
       var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
@@ -1984,7 +2053,7 @@
         if ($('fs-l-pf')) $('fs-l-pf').textContent = mode === 'snipe' && !keepMode() && market.snipe ? '+' + fmtk(profitAt(listPrice(), market.snipe)) : '—';
         if ($('fs-l-buys')) $('fs-l-buys').textContent = stats.buys;
         if ($('fs-l-sr')) $('fs-l-sr').textContent = stats.searches;
-        var lnet = sessionNet(); if ($('fs-l-net')) $('fs-l-net').textContent = lnet == null ? '—' : signed(lnet);
+        if ($('fs-l-net')) { $('fs-l-net').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-l-net').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
       } else {
         lock.classList.remove('show');
         if (fb && !panel.classList.contains('open')) fb.style.display = '';
@@ -2039,6 +2108,7 @@
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
     T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
     T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    calcProfit();
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
     T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
@@ -2050,7 +2120,7 @@
     if ($('fs-s-buys')) $('fs-s-buys').textContent = stats.buys;
     if ($('fs-s-sr')) $('fs-s-sr').textContent = stats.searches;
     if ($('fs-s-est')) { $('fs-s-est').textContent = stats.buys ? signed(stats.est) : '—'; $('fs-s-est').className = stats.est < 0 ? 'r' : stats.buys ? 'g' : ''; }
-    var net = sessionNet(); if ($('fs-s-net')) { $('fs-s-net').textContent = net == null ? '—' : signed(net); $('fs-s-net').className = net != null && net < 0 ? 'r' : net ? 'g' : ''; }
+    var pcard = stats.buys ? Math.round(stats.est / stats.buys) : null; if ($('fs-s-net')) { $('fs-s-net').textContent = pcard == null ? '—' : signed(pcard); $('fs-s-net').className = pcard != null && pcard < 0 ? 'r' : pcard ? 'g' : ''; }
     var fl = $('fs-filters'), fh = filtersHTML(); if (fl && fl.__html !== fh) { fl.__html = fh; fl.innerHTML = fh; }
     if ($('fs-block')) $('fs-block').textContent = blockMsg || '';
     if ($('fs-act')) $('fs-act').textContent = activity;
@@ -2074,6 +2144,7 @@
   setInterval(function () { if ((tab === 'hub' || tab === 'market') && document.getElementById('fs-panel') && document.getElementById('fs-panel').classList.contains('open')) render(); }, 5000);
   function boot(tries) {
     if (!document.getElementById('fs-panel') && document.body) { buildUI(); startBadgeObserver(); paintBadges(); }
+    hookCells();
     if (haveServices()) { wrapSearch(); if (!window.__futReady) { window.__futReady = true; log('trading services detected ✓'); } render(); }
     if ((tries || 0) < 180) setTimeout(function () { boot((tries || 0) + 1); }, 1000);
   }
