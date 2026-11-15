@@ -236,7 +236,7 @@
         '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
         '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
-      '</div></div>' +
+      '</div><div class="fs-bal"><span>If everything sells at its price</span><b id="fs-h-bal">—</b><small id="fs-h-bals"></small></div></div>' +
       '<div class="ios-h">Tools</div><div class="fs-hubbtns">' +
         '<button class="fs-hb" id="fs-h-auto"><span class="ic">' + ICON.refresh + '</span><span class="tx"><b>Auto relister</b><span id="fs-h-auto-s">Off</span></span><span class="fs-sw" id="fs-h-auto-sw"></span></button>' +
         hubTool('fs-h-bulk', ICON.list, 'List many at one price', 'Pick a player on your transfer list, one price for all', '') +
@@ -332,6 +332,9 @@
       if (tl.__html !== html) { tl.__html = html; tl.innerHTML = html; }
     }
     set('fs-h-cnt', hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX : '');
+    var hb = hub.bal, hbe = $('fs-h-bal');
+    set('fs-h-bal', hb && hb.n ? (hb.sum >= 0 ? '+' : '−') + fmt(Math.abs(hb.sum)) : '—'); if (hbe) hbe.className = hb && hb.sum < 0 ? 'r' : hb && hb.n ? 'g' : '';
+    set('fs-h-bals', hb ? hb.n + ' cards with known cost' + (hb.unknown ? ' · ' + hb.unknown + ' unknown' : '') + (hb.unlisted ? ' · ' + hb.unlisted + ' not listed' : '') : 'refresh to see');
     var n = function (v) { return hub.at ? String(v) : '—'; };
     set('fs-h-nsold', n(hub.sold)); set('fs-h-nact', n(hub.active)); set('fs-h-nexp', n(hub.expired)); set('fs-h-nun', n(hub.unlisted));
     set('fs-h-clear-s', hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first');

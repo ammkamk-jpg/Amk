@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.5.3
+// @version      5.6.0
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.5.3';
+  var VERSION = '5.6.0';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -951,6 +951,7 @@
   var TRADEPILE_MAX = 100;
 
   function summarize(items) {
+    hub.bal = listBalance(items);
     hub.at = Date.now(); hub.total = items.length; hub.sold = 0; hub.soldValue = 0; hub.active = 0; hub.expired = 0; hub.unlisted = 0;
     items.forEach(function (it) {
       var st = tradeStateOf(it);
@@ -1282,14 +1283,38 @@
     });
     return out;
   }
-  function alignRows(rows) {
+  // Balance of the transfer list: if every card sells at the price it's offered at (Buy Now,
+  // expired ones at their last price), the profit of all cards whose cost is known.
+  function listBalance(items) {
+    var b = { sum: 0, n: 0, value: 0, unknown: 0, unlisted: 0 };
+    (items || []).forEach(function (it) {
+      if (tradeStateOf(it) === 'closed') return;
+      var rp = rowProfit(it);
+      if (rp && !rp.sold) { b.sum += rp.profit; b.n++; b.value += afterTax(rp.price); }
+      else if (!((it._auction || {}).buyNowPrice > 0)) b.unlisted++; else b.unknown++;
+    });
+    return b;
+  }
+  function paintBalance(rows) {
+    var bar = document.getElementById('fs-tpbal'), bal = tpAlign.balance;
+    var onList = rows.length && bal && tpAlign.items === rows.length;
+    if (!onList) { if (bar && bar.parentNode) bar.parentNode.removeChild(bar); return; }
+    var list = rows[0].parentNode; if (!list || !list.parentNode) return;
+    if (!bar) { bar = document.createElement('div'); bar.id = 'fs-tpbal'; }
+    if (bar.nextSibling !== list) list.parentNode.insertBefore(bar, list);
+    var html = '<span class="k">If everything sells at its price</span><b class="' + (bal.sum < 0 ? 'neg' : '') + '">' + (bal.n ? (bal.sum >= 0 ? '+' : '−') + fmt(Math.abs(bal.sum)) : '—') + '</b>' +
+      '<span class="s">' + bal.n + ' card' + (bal.n === 1 ? '' : 's') + ' · ' + fmt(bal.value) + ' coins after tax' + (bal.unknown ? ' · ' + bal.unknown + ' without known cost' : '') + (bal.unlisted ? ' · ' + bal.unlisted + ' not listed' : '') + '</span>';
+    if (bar.__h !== html) { bar.__h = html; bar.innerHTML = html; }
+  }
+  function alignRows(rows, hooked) {
     if (tpAlign.busy || (Date.now() - tpAlign.at < 45000 && tpAlign.n === rows.length)) return;
     tpAlign.busy = true; tpAlign.at = Date.now(); tpAlign.n = rows.length; tpAlign.tried++;
     transferItems().then(function (items) {
       tpAlign.busy = false; tpAlign.ok = false;
       if (items) tpAlign.sample = items.slice(0, 4).map(function (it) { return { rating: ratingOf(it), state: tradeStateOf(it), buyNow: (it._auction || {}).buyNowPrice, lastSalePrice: it.lastSalePrice }; });
       tpAlign.items = items ? items.length : null; tpAlign.rows = rows.length;
-      if (!items || items.length !== rows.length) return;
+      if (items) { tpAlign.balance = listBalance(items); }
+      if (!items || items.length !== rows.length || hooked) { paintBadges(); return; }
       var sigs = []; for (var i = 0; i < rows.length; i++) sigs.push(rowSig(rows[i]));
       var cands = tpOrders(items);
       for (var c = 0; c < cands.length; c++) {
@@ -1361,7 +1386,8 @@
     try {
       var rows = document.querySelectorAll(ROW_SEL), hooked = 0;
       for (var h = 0; h < rows.length; h++) if (rows[h].__fsItem || rows[h].__fsGuess || rows[h].querySelector('[data-fs-id]')) hooked++;
-      if (rows.length && !hooked && rows.length <= 100) alignRows(rows);
+      if (rows.length && rows.length <= 100) alignRows(rows, hooked);
+      paintBalance(rows);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i], host = row.querySelector('.rowContent') || row;
         var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;
@@ -1600,6 +1626,8 @@
     '.sx-calc{background:' + C_CARD + ';border:1px solid ' + C_LINE + ';border-radius:18px;padding:14px 16px;margin:12px 0}.sx-calc .row{display:flex;gap:10px;margin-top:8px}.sx-calc label{flex:1;min-width:0;font-size:12px;color:' + C_MUT + ';display:flex;flex-direction:column;gap:5px}' +
     '.sx-calc .fs-num{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;margin:0!important;text-align:left;-webkit-appearance:none}' +
     '.sx-calc .res{margin-top:10px;font-size:13px;color:' + C_MUT + ';line-height:1.4}.sx-calc .res b{display:block;font-size:24px;font-weight:800;margin:2px 0;' + NUM + '}.sx-calc .res span{display:block;font-size:12px}.sx-calc .res.g b{color:' + C_OK + '}.sx-calc .res.r b{color:' + C_RED + '}' +
+    '#fs-tpbal{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:8px 10px;padding:12px 16px;border-radius:14px;background:rgba(18,23,34,.95);border:1px solid rgba(74,222,128,.45);font-family:' + FONT + ';color:#fff;position:relative;z-index:5}#fs-tpbal .k{font-size:13px;color:' + C_MUT + ';flex:1 1 auto}#fs-tpbal b{font-size:22px;font-weight:800;color:' + C_OK + ';' + NUM + '}#fs-tpbal b.neg{color:' + C_RED + '}#fs-tpbal .s{flex-basis:100%;font-size:12px;color:' + C_MUT + '}' +
+    '.fs-bal{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;padding:12px 16px 14px;border-top:1px solid ' + C_LINE + '}.fs-bal span{flex:1;font-size:13px;color:' + C_MUT + '}.fs-bal b{font-size:20px;font-weight:800;' + NUM + '}.fs-bal b.g{color:' + C_OK + '}.fs-bal b.r{color:' + C_RED + '}.fs-bal small{flex-basis:100%;font-size:12px;color:' + C_MUT + '}' +
     '.fs-badge.pf{border-color:rgba(74,222,128,.6);color:' + C_OK + '}.fs-badge.pf.neg{border-color:rgba(248,113,113,.6);color:' + C_RED + '}' +
     '.fs-badge{position:absolute;left:0;top:0;z-index:6;padding:1px 8px;border-radius:999px;background:rgba(18,23,34,.94);border:1px solid rgba(90,200,245,.5);color:#fff;font:700 11px/1.5 ' + FONT + ';' + NUM + 'white-space:nowrap;pointer-events:none}' +
     // running screen
@@ -1865,7 +1893,7 @@
         '<div class="c"><div class="l">Active</div><div class="v c" id="fs-h-nact">—</div></div>' +
         '<div class="c"><div class="l">Expired</div><div class="v r" id="fs-h-nexp">—</div></div>' +
         '<div class="c"><div class="l">Unlisted</div><div class="v" id="fs-h-nun">—</div></div>' +
-      '</div></div>' +
+      '</div><div class="fs-bal"><span>If everything sells at its price</span><b id="fs-h-bal">—</b><small id="fs-h-bals"></small></div></div>' +
       '<div class="ios-h">Tools</div><div class="fs-hubbtns">' +
         '<button class="fs-hb" id="fs-h-auto"><span class="ic">' + ICON.refresh + '</span><span class="tx"><b>Auto relister</b><span id="fs-h-auto-s">Off</span></span><span class="fs-sw" id="fs-h-auto-sw"></span></button>' +
         hubTool('fs-h-bulk', ICON.list, 'List many at one price', 'Pick a player on your transfer list, one price for all', '') +
@@ -1961,6 +1989,9 @@
       if (tl.__html !== html) { tl.__html = html; tl.innerHTML = html; }
     }
     set('fs-h-cnt', hub.at ? '· ' + hub.total + '/' + TRADEPILE_MAX : '');
+    var hb = hub.bal, hbe = $('fs-h-bal');
+    set('fs-h-bal', hb && hb.n ? (hb.sum >= 0 ? '+' : '−') + fmt(Math.abs(hb.sum)) : '—'); if (hbe) hbe.className = hb && hb.sum < 0 ? 'r' : hb && hb.n ? 'g' : '';
+    set('fs-h-bals', hb ? hb.n + ' cards with known cost' + (hb.unknown ? ' · ' + hb.unknown + ' unknown' : '') + (hb.unlisted ? ' · ' + hb.unlisted + ' not listed' : '') : 'refresh to see');
     var n = function (v) { return hub.at ? String(v) : '—'; };
     set('fs-h-nsold', n(hub.sold)); set('fs-h-nact', n(hub.active)); set('fs-h-nexp', n(hub.expired)); set('fs-h-nun', n(hub.unlisted));
     set('fs-h-clear-s', hub.busy === 'clear' ? 'working…' : hub.at ? (hub.sold ? hub.sold + ' sold · +' + fmt(hub.soldValue) : 'nothing sold yet') : 'refresh first');

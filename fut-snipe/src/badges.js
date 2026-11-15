@@ -66,14 +66,38 @@
     });
     return out;
   }
-  function alignRows(rows) {
+  // Balance of the transfer list: if every card sells at the price it's offered at (Buy Now,
+  // expired ones at their last price), the profit of all cards whose cost is known.
+  function listBalance(items) {
+    var b = { sum: 0, n: 0, value: 0, unknown: 0, unlisted: 0 };
+    (items || []).forEach(function (it) {
+      if (tradeStateOf(it) === 'closed') return;
+      var rp = rowProfit(it);
+      if (rp && !rp.sold) { b.sum += rp.profit; b.n++; b.value += afterTax(rp.price); }
+      else if (!((it._auction || {}).buyNowPrice > 0)) b.unlisted++; else b.unknown++;
+    });
+    return b;
+  }
+  function paintBalance(rows) {
+    var bar = document.getElementById('fs-tpbal'), bal = tpAlign.balance;
+    var onList = rows.length && bal && tpAlign.items === rows.length;
+    if (!onList) { if (bar && bar.parentNode) bar.parentNode.removeChild(bar); return; }
+    var list = rows[0].parentNode; if (!list || !list.parentNode) return;
+    if (!bar) { bar = document.createElement('div'); bar.id = 'fs-tpbal'; }
+    if (bar.nextSibling !== list) list.parentNode.insertBefore(bar, list);
+    var html = '<span class="k">If everything sells at its price</span><b class="' + (bal.sum < 0 ? 'neg' : '') + '">' + (bal.n ? (bal.sum >= 0 ? '+' : '−') + fmt(Math.abs(bal.sum)) : '—') + '</b>' +
+      '<span class="s">' + bal.n + ' card' + (bal.n === 1 ? '' : 's') + ' · ' + fmt(bal.value) + ' coins after tax' + (bal.unknown ? ' · ' + bal.unknown + ' without known cost' : '') + (bal.unlisted ? ' · ' + bal.unlisted + ' not listed' : '') + '</span>';
+    if (bar.__h !== html) { bar.__h = html; bar.innerHTML = html; }
+  }
+  function alignRows(rows, hooked) {
     if (tpAlign.busy || (Date.now() - tpAlign.at < 45000 && tpAlign.n === rows.length)) return;
     tpAlign.busy = true; tpAlign.at = Date.now(); tpAlign.n = rows.length; tpAlign.tried++;
     transferItems().then(function (items) {
       tpAlign.busy = false; tpAlign.ok = false;
       if (items) tpAlign.sample = items.slice(0, 4).map(function (it) { return { rating: ratingOf(it), state: tradeStateOf(it), buyNow: (it._auction || {}).buyNowPrice, lastSalePrice: it.lastSalePrice }; });
       tpAlign.items = items ? items.length : null; tpAlign.rows = rows.length;
-      if (!items || items.length !== rows.length) return;
+      if (items) { tpAlign.balance = listBalance(items); }
+      if (!items || items.length !== rows.length || hooked) { paintBadges(); return; }
       var sigs = []; for (var i = 0; i < rows.length; i++) sigs.push(rowSig(rows[i]));
       var cands = tpOrders(items);
       for (var c = 0; c < cands.length; c++) {
@@ -145,7 +169,8 @@
     try {
       var rows = document.querySelectorAll(ROW_SEL), hooked = 0;
       for (var h = 0; h < rows.length; h++) if (rows[h].__fsItem || rows[h].__fsGuess || rows[h].querySelector('[data-fs-id]')) hooked++;
-      if (rows.length && !hooked && rows.length <= 100) alignRows(rows);
+      if (rows.length && rows.length <= 100) alignRows(rows, hooked);
+      paintBalance(rows);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i], host = row.querySelector('.rowContent') || row;
         var card = row.querySelector('.entityContainer canvas') || row.querySelector('.entityContainer') || row;

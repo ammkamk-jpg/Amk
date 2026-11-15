@@ -3,6 +3,7 @@
   var TRADEPILE_MAX = 100;
 
   function summarize(items) {
+    hub.bal = listBalance(items);
     hub.at = Date.now(); hub.total = items.length; hub.sold = 0; hub.soldValue = 0; hub.active = 0; hub.expired = 0; hub.unlisted = 0;
     items.forEach(function (it) {
       var st = tradeStateOf(it);
