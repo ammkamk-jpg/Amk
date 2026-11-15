@@ -40,12 +40,14 @@
   // person would (start at a known price, else the cheapest listing seen, step ~12%, then halve
   // the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
   // Returns {price, fresh} or null (none listed / stopped).
+  // The cheapest listings the price came from, so you can see why (e.g. 119k · 120k · 120k · 121k).
+  function withSeen(pick, items) { if (pick) pick.seen = items.map(function (x) { return x.p; }).sort(function (a, b) { return a - b; }).slice(0, 4); return pick; }
   async function findPrice(start) {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
-    if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
+    if (probeVerdict(asListings(r.items)) === 'few') return withSeen(pickMarketPrice(asListings(r.items)), r.items); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
     // start at a known price, else the cheapest FRESH listing seen (a stale cheap outlier would cost extra steps)
     var firstFresh = r.items.filter(function (x) { return isFreshSecs(x.secs); })[0] || r.items[0];
@@ -65,7 +67,7 @@
       if (!hiItems && hi) { var hr = await search(hi, true); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
       few = hiItems || r.items;
     }
-    return pickMarketPrice(asListings(few));
+    return withSeen(pickMarketPrice(asListings(few)), few);
   }
 
   async function checkPrice() {
@@ -79,9 +81,10 @@
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var ss = sellAndSnipe(pick.price, mySell(), cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
-    market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
+    market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now(); market.seen = pick.seen || [];
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
+    if (pick.seen && pick.seen.length) feed('Cheapest listed right now: ' + pick.seen.map(fmtk).join(' · ') + ' → price ' + fmt(pick.price) + ' (2nd cheapest, so one cheap outlier can\u2019t set it)', 'check');
     feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (mySell() > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
     if (sellAboveMarket()) feed('⚠ Your sell price ' + fmt(mySell()) + ' is ' + sellAboveMarket() + '% above today\u2019s price ' + fmt(pick.price) + ' - cards may not sell. Sell price on Auto = today\u2019s price.', 'stop');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));

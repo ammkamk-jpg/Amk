@@ -117,3 +117,6 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 ### 5.6.1 – safety fix after a bad run
 - Live: sell price 129,000 (manual, from an earlier day) + 5.4.2 default "profit from your sell price" -> snipe 122,000 while the checked market was 123,000; two cards bought at 119k/120k.
 - Default back to "lower of sell / market" (one-time migration `mig560`, also resets an old untied sell price to Auto). A manual sell price now belongs to the card it was set for (`cfg.sellDef`, `mySell()`); another player = Auto. Price check warns when your sell price is >2% above the checked price.
+
+### 5.6.2
+- Live: market 120,000 (2nd cheapest of 6 listings <= 123,000), snipe 113,000 = correct math (120k - 5% - 500); user expected ~126k from EA AVG. Now the feed and the Sniper note show the cheapest listings the price came from (`market.seen`).

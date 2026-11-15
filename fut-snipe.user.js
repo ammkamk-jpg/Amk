@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.6.1
+// @version      5.6.2
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.6.1';
+  var VERSION = '5.6.2';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -700,12 +700,14 @@
   // person would (start at a known price, else the cheapest listing seen, step ~12%, then halve
   // the gap) until only a few listings are left, and take the 2nd-cheapest fresh one.
   // Returns {price, fresh} or null (none listed / stopped).
+  // The cheapest listings the price came from, so you can see why (e.g. 119k · 120k · 120k · 121k).
+  function withSeen(pick, items) { if (pick) pick.seen = items.map(function (x) { return x.p; }).sort(function (a, b) { return a - b; }).slice(0, 4); return pick; }
   async function findPrice(start) {
     var asListings = function (items) { return items.map(function (x) { return { price: x.p, secs: x.secs }; }); };
     var r = await search(0, true); if (!r) return null;
     feed('Checking ' + searchLabel() + ' · ' + (r.items.length ? r.items.length + ' listed' : 'none listed'), 'check');
     if (!r.ok || !r.items.length) return null;
-    if (probeVerdict(asListings(r.items)) === 'few') return pickMarketPrice(asListings(r.items)); // tiny market: that's all there is
+    if (probeVerdict(asListings(r.items)) === 'few') return withSeen(pickMarketPrice(asListings(r.items)), r.items); // tiny market: that's all there is
     var top = r.items[r.items.length - 1].p, lo = 0, hi = 0, hiItems = null, few = null;
     // start at a known price, else the cheapest FRESH listing seen (a stale cheap outlier would cost extra steps)
     var firstFresh = r.items.filter(function (x) { return isFreshSecs(x.secs); })[0] || r.items[0];
@@ -725,7 +727,7 @@
       if (!hiItems && hi) { var hr = await search(hi, true); if (!hr) return null; hiItems = hr.ok ? hr.items : []; }
       few = hiItems || r.items;
     }
-    return pickMarketPrice(asListings(few));
+    return withSeen(pickMarketPrice(asListings(few)), few);
   }
 
   async function checkPrice() {
@@ -739,9 +741,10 @@
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
     var ss = sellAndSnipe(pick.price, mySell(), cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
-    market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
+    market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now(); market.seen = pick.seen || [];
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
+    if (pick.seen && pick.seen.length) feed('Cheapest listed right now: ' + pick.seen.map(fmtk).join(' · ') + ' → price ' + fmt(pick.price) + ' (2nd cheapest, so one cheap outlier can\u2019t set it)', 'check');
     feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (mySell() > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
     if (sellAboveMarket()) feed('⚠ Your sell price ' + fmt(mySell()) + ' is ' + sellAboveMarket() + '% above today\u2019s price ' + fmt(pick.price) + ' - cards may not sell. Sell price on Auto = today\u2019s price.', 'stop');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
@@ -2215,7 +2218,7 @@
     T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
     T('fs-t-profsub', keep ? (cfg.afterBuy === 2 ? 'in Unassigned' : 'transfer list') : 'after EA’s 5% cut');
-    T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ('Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
+    T('fs-t-sub', bidMode() && haveSearch() ? 'Bids on auctions ending within ' + (cfg.bidSecs || 90) + 's, one bid per card' + (keep ? (bidMaxNow() > 0 ? '.' : ' - set a Max. Bid (or Max. Buy Now) in the web app search first.') : ', up to the checked snipe price.') + ' Won cards ' + (keep ? (cfg.afterBuy === 2 ? 'stay in Unassigned.' : 'go to your transfer list.') : 'get listed.') : keep ? (webMaxBuy() ? 'Buys up to the Max. Buy Now of your web app search.' : keepMaxNow() ? 'Fallback price from Settings. A Max. Buy Now in your web app search replaces it.' : 'Set a Max. Buy Now in the web app search, search once, then start.') : !haveSearch() ? '' : market.snipe ? ((market.seen && market.seen.length ? 'Cheapest now ' + market.seen.map(fmtk).join(' · ') + ' · ' : '') + 'Checked ' + ago(market.checkedAt) + (market.fresh ? '' : ' · no fresh listings') + (stats.eaMax ? ' · EA range ' + fmtk(stats.eaMin) + '–' + fmtk(stats.eaMax) : '') + '. The bot re-checks the price as it runs.') : 'Estimate from your settings; the price check sets the exact prices at the start.');
     calcProfit();
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
     T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
