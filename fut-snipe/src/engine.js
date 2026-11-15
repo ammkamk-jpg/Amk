@@ -77,7 +77,7 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit), sp = ss.snipe;
+    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
@@ -91,6 +91,8 @@
   // After a buy: List (price check + auto-relist, as always), or keep it: move it to the transfer
   // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
   // you set (keepMax, optional keepMin).
+  // Profit from your own sell price (default) or from the lower of sell / market; +/- tolerance.
+  function snipeOpts() { return { fromSell: (cfg.snipeFrom | 0) === 1, tol: (cfg.profitTol | 0) / 100 }; }
   function keepMode() { return (cfg.afterBuy | 0) !== 0; }
   // Manual mode buys at the "Max. Buy Now" (and from the "Min. Buy Now") you typed into the web
   // app's own search. The bot's fields in Settings are only a fallback for a search without one.
@@ -103,7 +105,7 @@
   // Sell price or target profit changed (also mid-run): move the snipe point with it.
   function applySell() {
     if (keepMode() || !(market.price > 0)) return;
-    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit);
+    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit, snipeOpts());
     if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
     market.snipe = ss.snipe;
     if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }

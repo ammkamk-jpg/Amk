@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.4.1
+// @version      5.4.2
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.4.1';
+  var VERSION = '5.4.2';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -54,9 +54,19 @@
 
   // Snipe point = what you get after EA's 5% tax, minus the target profit, rounded down to a
   // valid price. 15,000 with profit 500 -> 14,250 - 500 = 13,750. 0 = the profit is too high.
-  function snipePoint(price, profit) {
-    var raw = afterTax(price) - (profit || 0);
-    return raw < MIN_PRICE ? 0 : floorStep(raw);
+  // tol (0-1): above 100k EA's price steps are 1,000, so "profit 850" can only be 550 or 1,550.
+  // With a tolerance the next step up is taken when its profit is still >= profit*(1-tol) and
+  // closer to the target (850 at 10% -> 765+ is fine).
+  function snipePoint(price, profit, tol) {
+    profit = profit || 0;
+    var net = afterTax(price), raw = net - profit;
+    if (raw < MIN_PRICE) return 0;
+    var f = floorStep(raw);
+    if (tol > 0 && profit > 0) {
+      var up = f + stepFor(f), pu = net - up, pf = net - f;
+      if (pu >= profit * (1 - tol) && Math.abs(pu - profit) < Math.abs(pf - profit)) return up;
+    }
+    return f;
   }
 
   function isFreshSecs(s) { return s == null || (s >= FRESH_MIN_S && s <= FRESH_MAX_S); }
@@ -119,9 +129,14 @@
   // Manual sell price (0 = use the checked market price). The snipe point comes from the LOWER of
   // the two, so the target profit holds either way: selling above the market buys at the normal
   // snipe point (more profit), selling below it buys cheaper.
-  function sellAndSnipe(checked, manual, profit) {
+  // opts.fromSell: the profit counts from YOUR sell price even above the market (the run then
+  // buys up to sell - tax - profit; whether the card sells at that price is up to you).
+  // opts.tol: profit tolerance, see snipePoint.
+  function sellAndSnipe(checked, manual, profit, opts) {
+    opts = opts || {};
     var sell = manual > 0 ? roundStep(manual) : checked;
-    return { sell: sell, snipe: snipePoint(Math.min(checked || sell, sell), profit) };
+    var base = opts.fromSell ? sell : Math.min(checked || sell, sell);
+    return { sell: sell, snipe: snipePoint(base, profit, opts.tol || 0) };
   }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {
@@ -299,7 +314,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90, snipeFrom: 1, profitTol: 10
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -718,7 +733,7 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit), sp = ss.snipe;
+    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
@@ -732,6 +747,8 @@
   // After a buy: List (price check + auto-relist, as always), or keep it: move it to the transfer
   // list unlisted, or leave it in Unassigned. Keep modes skip the price check and buy at a price
   // you set (keepMax, optional keepMin).
+  // Profit from your own sell price (default) or from the lower of sell / market; +/- tolerance.
+  function snipeOpts() { return { fromSell: (cfg.snipeFrom | 0) === 1, tol: (cfg.profitTol | 0) / 100 }; }
   function keepMode() { return (cfg.afterBuy | 0) !== 0; }
   // Manual mode buys at the "Max. Buy Now" (and from the "Min. Buy Now") you typed into the web
   // app's own search. The bot's fields in Settings are only a fallback for a search without one.
@@ -744,7 +761,7 @@
   // Sell price or target profit changed (also mid-run): move the snipe point with it.
   function applySell() {
     if (keepMode() || !(market.price > 0)) return;
-    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit);
+    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit, snipeOpts());
     if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
     market.snipe = ss.snipe;
     if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
@@ -1653,6 +1670,8 @@
     return section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins per card after EA\u2019s 5% tax.') +
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
+        segSetting('Profit counts from', 'snipeFrom', [['Your sell price', 1], ['Lower of sell / market', 0]], 'Your sell price: the bot buys up to sell price − 5% − target profit, so the profit is about your target. Lower of both: safer when your sell price is above the market, but the profit then comes out higher.') +
+        segSetting('Profit tolerance', 'profitTol', [['0%', 0], ['±10%', 10], ['±20%', 20], ['±30%', 30]], 'Above 100k EA prices go in 1,000 steps, so a target of 850 can only be 550 or 1,550. The tolerance lets the bot pick the step closest to your target.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
         segSetting('Buy with', 'bidMode', [['Buy Now', 0], ['Bids', 1]], 'Bids = bid on auctions about to end, one bid per card. Max bid: the web app search\u2019s Max. Bid (else Max. Buy Now), or the snipe price in List mode.') +
@@ -1909,7 +1928,7 @@
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'snipeFrom' || seg === 'profitTol') applySell(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var sp = g('data-spd'); if (sp) { speedStep(Number(sp)); save(); render(); return; }
       var hr = g('data-hr'); if (hr != null) { cfg.hubRange = Number(hr); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }

@@ -159,6 +159,8 @@
     return section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins per card after EA\u2019s 5% tax.') +
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
+        segSetting('Profit counts from', 'snipeFrom', [['Your sell price', 1], ['Lower of sell / market', 0]], 'Your sell price: the bot buys up to sell price − 5% − target profit, so the profit is about your target. Lower of both: safer when your sell price is above the market, but the profit then comes out higher.') +
+        segSetting('Profit tolerance', 'profitTol', [['0%', 0], ['±10%', 10], ['±20%', 20], ['±30%', 30]], 'Above 100k EA prices go in 1,000 steps, so a target of 850 can only be 550 or 1,550. The tolerance lets the bot pick the step closest to your target.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
         segSetting('Buy with', 'bidMode', [['Buy Now', 0], ['Bids', 1]], 'Bids = bid on auctions about to end, one bid per card. Max bid: the web app search\u2019s Max. Bid (else Max. Buy Now), or the snipe price in List mode.') +
@@ -415,7 +417,7 @@
       var g = function (a) { return tg.getAttribute && tg.getAttribute(a); };
       var tb = g('data-tab'); if (tb) { tab = tb; render(); return; }
       var sw = g('data-sw'); if (sw) { cfg[sw] = cfg[sw] ? 0 : 1; if (sw === 'vibrate' && cfg.vibrate) vibrate(); if (sw === 'badges') { if (cfg.badges) paintBadges(); else removeBadges(); } save(); render(); return; }
-      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
+      var seg = g('data-seg'); if (seg) { cfg[seg] = Number(g('data-val')) || 0; if (seg === 'speed') applySpeed(); if (seg === 'snipeFrom' || seg === 'profitTol') applySell(); if (seg === 'sound') { unlockAudio(); playSound(cfg.sound); } save(); render(); return; }
       var sp = g('data-spd'); if (sp) { speedStep(Number(sp)); save(); render(); return; }
       var hr = g('data-hr'); if (hr != null) { cfg.hubRange = Number(hr); save(); render(); return; }
       var hf = g('data-hf'); if (hf) { hubFilter = hf; hubShowAll = false; render(); return; }

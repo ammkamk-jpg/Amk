@@ -92,3 +92,7 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 ### 5.4.1
 - Feed: searches without a hit are "quiet" lines, only the last 3 stay (with the search number). Hits, fails and stops stay.
 - List-many form: label above a full-width field (EA's global input CSS squeezed the labels on iOS).
+
+### 5.4.2
+- Profit counts from your sell price by default (`cfg.snipeFrom` 1; 0 = old "lower of sell / market").
+- Profit tolerance `cfg.profitTol` (0/10/20/30 %): on 1,000-coin steps picks the step closest to the target if its profit is >= target*(1-tol).

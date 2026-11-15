@@ -10,9 +10,19 @@
 
   // Snipe point = what you get after EA's 5% tax, minus the target profit, rounded down to a
   // valid price. 15,000 with profit 500 -> 14,250 - 500 = 13,750. 0 = the profit is too high.
-  function snipePoint(price, profit) {
-    var raw = afterTax(price) - (profit || 0);
-    return raw < MIN_PRICE ? 0 : floorStep(raw);
+  // tol (0-1): above 100k EA's price steps are 1,000, so "profit 850" can only be 550 or 1,550.
+  // With a tolerance the next step up is taken when its profit is still >= profit*(1-tol) and
+  // closer to the target (850 at 10% -> 765+ is fine).
+  function snipePoint(price, profit, tol) {
+    profit = profit || 0;
+    var net = afterTax(price), raw = net - profit;
+    if (raw < MIN_PRICE) return 0;
+    var f = floorStep(raw);
+    if (tol > 0 && profit > 0) {
+      var up = f + stepFor(f), pu = net - up, pf = net - f;
+      if (pu >= profit * (1 - tol) && Math.abs(pu - profit) < Math.abs(pf - profit)) return up;
+    }
+    return f;
   }
 
   function isFreshSecs(s) { return s == null || (s >= FRESH_MIN_S && s <= FRESH_MAX_S); }
@@ -75,9 +85,14 @@
   // Manual sell price (0 = use the checked market price). The snipe point comes from the LOWER of
   // the two, so the target profit holds either way: selling above the market buys at the normal
   // snipe point (more profit), selling below it buys cheaper.
-  function sellAndSnipe(checked, manual, profit) {
+  // opts.fromSell: the profit counts from YOUR sell price even above the market (the run then
+  // buys up to sell - tax - profit; whether the card sells at that price is up to you).
+  // opts.tol: profit tolerance, see snipePoint.
+  function sellAndSnipe(checked, manual, profit, opts) {
+    opts = opts || {};
     var sell = manual > 0 ? roundStep(manual) : checked;
-    return { sell: sell, snipe: snipePoint(Math.min(checked || sell, sell), profit) };
+    var base = opts.fromSell ? sell : Math.min(checked || sell, sell);
+    return { sell: sell, snipe: snipePoint(base, profit, opts.tol || 0) };
   }
   // "Every n" made fuzzy: n +/- spread (e.g. 50 +/- 20% -> 40-60), at least 1.
   function fuzzyCount(n, spread, rnd) {

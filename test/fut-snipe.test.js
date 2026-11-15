@@ -310,3 +310,16 @@ test("auto bidder: next bid and which auctions to bid on", () => {
   const p = P.bidPick(rows, 15000, 90);
   assert.deepEqual(p.map((r) => [r.id, r.bid]), [[2, 12000], [1, 14250]]);
 });
+
+test("profit counts from your sell price, with tolerance on 1,000 steps", () => {
+  // the reported case: market 126k, your sell price 129k, target 500
+  assert.deepEqual(P.sellAndSnipe(126000, 129000, 500), { sell: 129000, snipe: 119000 }, "old: lower of both -> +3,550");
+  const s = P.sellAndSnipe(126000, 129000, 500, { fromSell: true, tol: 0.1 });
+  assert.equal(s.snipe, 122000); assert.equal(P.profitAt(129000, s.snipe), 550);
+  // target 850 at 129k: 122,000 gives 550 (too far under), 121,000 gives 1,550
+  assert.equal(P.snipePoint(129000, 850, 0.1), 121000);
+  // target 1,000 at 129k with 50%: 550 is closer than 1,550 and >= 500
+  assert.equal(P.snipePoint(129000, 1000, 0.5), 122000);
+  // small cards are unaffected (100-coin steps hit the target)
+  assert.equal(P.snipePoint(15000, 500, 0.1), 13750);
+});
