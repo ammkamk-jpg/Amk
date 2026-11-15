@@ -104,3 +104,6 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 
 ### 5.5.1
 - Profit tags: the live app showed the `UTItemTableCellView` hook installed but no row with an item. Now hooks every `UT*TableCell*View/UT*ListItem*View` with a render, and as fallback lines up `requestTransferItems` with the rows (every 45 s max, only when rows == items and the ledger has entries; used only if every rating + shown Buy Now matches). Diagnostics: cellHook {calls, withItem}, tpAlign, ledgerOpen, rowsGuessed, auctionHTML.
+
+### 5.5.2
+- Profit tags for hand-bought cards: cost = item.lastSalePrice (EA field, observed in sampleItemKeys; assumed = price paid while the card has not sold again). Row line-up no longer needs ledger entries. Diagnostics tpAlign.sample shows rating/state/buyNow/lastSalePrice of 4 items.

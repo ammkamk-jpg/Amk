@@ -34,8 +34,8 @@
     return cellHook.done;
   }
   // Fallback when the hook finds nothing: the transfer list page shows exactly the items of
-  // requestTransferItems. Read them (at most every 45 s, only while such rows are on screen and
-  // the bot has buys on record), then line them up with the rows. A line-up is used only if every
+  // requestTransferItems. Read them (at most every 45 s, only while such rows are on screen),
+  // then line them up with the rows. A line-up is used only if every
   // row's rating (and Buy Now, where the row shows one) matches its item.
   var tpAlign = { at: 0, busy: false, n: 0, ok: false, tried: 0 };
   function rowSig(row) {
@@ -59,11 +59,12 @@
     return out;
   }
   function alignRows(rows) {
-    var open = Object.keys(ledger.buys).length; if (!open && !ledger.sales.length) return;
     if (tpAlign.busy || (Date.now() - tpAlign.at < 45000 && tpAlign.n === rows.length)) return;
     tpAlign.busy = true; tpAlign.at = Date.now(); tpAlign.n = rows.length; tpAlign.tried++;
     transferItems().then(function (items) {
       tpAlign.busy = false; tpAlign.ok = false;
+      if (items) tpAlign.sample = items.slice(0, 4).map(function (it) { return { rating: ratingOf(it), state: tradeStateOf(it), buyNow: (it._auction || {}).buyNowPrice, lastSalePrice: it.lastSalePrice }; });
+      tpAlign.items = items ? items.length : null; tpAlign.rows = rows.length;
       if (!items || items.length !== rows.length) return;
       var sigs = []; for (var i = 0; i < rows.length; i++) sigs.push(rowSig(rows[i]));
       var cands = tpOrders(items);
@@ -86,6 +87,10 @@
     var id = String(it.id), b = ledger.buys[id];
     if (b) { var a = it._auction || {}, price = tradeStateOf(it) === 'closed' ? salePriceOf(it) : (a.buyNowPrice > 0 ? a.buyNowPrice : b.list); return price > 0 ? { profit: profitAt(price, b.buy), price: price } : null; }
     for (var i = 0; i < ledger.sales.length && i < 300; i++) if (ledger.sales[i].id === id && ledger.sales[i].profit != null) return { profit: ledger.sales[i].profit, price: ledger.sales[i].sold, sold: true };
+    // Bought by hand: EA keeps the price the card last changed hands for (lastSalePrice) = what
+    // you paid, as long as it hasn't sold again. Packed cards have 0 -> no tag.
+    var paid = Number(it.lastSalePrice) || 0, a2 = it._auction || {};
+    if (paid > 0 && tradeStateOf(it) !== 'closed' && a2.buyNowPrice > 0) return { profit: profitAt(a2.buyNowPrice, paid), price: a2.buyNowPrice, manual: true };
     return null;
   }
   function paintProfitTag(host, card, it) {
