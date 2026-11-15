@@ -77,12 +77,13 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit, snipeOpts()), sp = ss.snipe;
+    var ss = sellAndSnipe(pick.price, mySell(), cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (cfg.sellPrice > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
+    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (mySell() > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
+    if (sellAboveMarket()) feed('⚠ Your sell price ' + fmt(mySell()) + ' is ' + sellAboveMarket() + '% above today\u2019s price ' + fmt(pick.price) + ' - cards may not sell. Sell price on Auto = today\u2019s price.', 'stop');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
     phase = 'running'; render();
     return true;
@@ -101,14 +102,19 @@
   function keepMaxNow() { return webMaxBuy() || (cfg.keepMax | 0); }
   function keepMinNow() { var c = webCrit(); return c && c.minBuy > 0 ? Number(c.minBuy) : (cfg.keepMin | 0); }
   // Where bought cards get listed: your manual sell price, else the checked market price.
-  function listPrice() { return cfg.sellPrice > 0 ? roundStep(cfg.sellPrice) : market.price; }
+  // Your own sell price counts only for the card it was set for (a 129k price must never carry
+  // over to the next player you search).
+  function mySell() { var d = searchedDefId(); return cfg.sellPrice > 0 && (!cfg.sellDef || !d || String(cfg.sellDef) === String(d)) ? cfg.sellPrice : 0; }
+  // Your sell price above today's market: say so (cards may not sell, and the profit is optimistic).
+  function sellAboveMarket() { var s = mySell(); return s > 0 && market.price > 0 && s > market.price * 1.02 ? Math.round((s / market.price - 1) * 100) : 0; }
+  function listPrice() { return mySell() > 0 ? roundStep(mySell()) : market.price; }
   // Sell price or target profit changed (also mid-run): move the snipe point with it.
   function applySell() {
     if (keepMode() || !(market.price > 0)) return;
-    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit, snipeOpts());
+    var ss = sellAndSnipe(market.price, mySell(), cfg.minProfit, snipeOpts());
     if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
     market.snipe = ss.snipe;
-    if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
+    if (running) { feed('Sell at ' + fmt(ss.sell) + (mySell() > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
   }
   async function afterBuy(item) {
     if (!keepMode()) return relist(item);

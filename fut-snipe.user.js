@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TangaTolga Sniper
 // @namespace    local.tangatolga.sniper
-// @version      5.6.0
+// @version      5.6.1
 // @description  Self-run FUT transfer-market sniper for the EA SPORTS FC Web App. One Start button: checks the market price on EA's own market, snipes cards at or below price minus tax minus your target profit, auto-relists, re-checks the price as the market moves. Price tags on cards. No third-party servers.
 // @author       you
 // @match        *://www.ea.com/*ea-sports-fc/ultimate-team/web-app*
@@ -40,7 +40,7 @@
     return;
   }
   window.__futSnipeLoaded = true; // an old FUT Snipe loading after this one stops itself
-  var VERSION = '5.6.0';
+  var VERSION = '5.6.1';
 
   // ---------- pricing (pure math; test/fut-snipe.test.js loads this file on its own) ----------
   var EA_TAX = 0.05, MIN_PRICE = 150, FEW = 4;
@@ -314,7 +314,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90, snipeFrom: 1, profitTol: 10
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90, snipeFrom: 0, profitTol: 10, sellDef: 0
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -323,6 +323,10 @@
   var cfg = load();
   // Auto/Custom switches (0 = Auto). Old saves with own values start on Custom.
   var rawCfg = {}; try { rawCfg = JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) {}
+  // 5.4.2 made 'profit from your sell price' the default: with a sell price above the market that
+  // buys at market price. Back to the safe 'lower of sell / market' once.
+  // An old sell price isn't tied to a card yet (it would apply to every player): back to Auto.
+  if (!rawCfg.mig560) { cfg.snipeFrom = 0; if (cfg.sellPrice > 0 && !cfg.sellDef) cfg.sellPrice = 0; cfg.mig560 = 1; }
   if (!('cRun' in rawCfg)) cfg.cRun = cfg.runMinutes > 0 ? 1 : 0;
   if (!('cCap' in rawCfg)) cfg.cCap = cfg.sessionBuyCap !== 15 ? 1 : 0;
   if (!('cCoins' in rawCfg)) cfg.cCoins = 0;
@@ -733,12 +737,13 @@
     var pick; try { pick = await findPrice(market.price); } finally { matchId = keepMatch; }
     if (!running) return false;
     if (!pick) { feed(searchLabel() + ' · none listed yet', 'miss'); return false; }
-    var ss = sellAndSnipe(pick.price, cfg.sellPrice, cfg.minProfit, snipeOpts()), sp = ss.snipe;
+    var ss = sellAndSnipe(pick.price, mySell(), cfg.minProfit, snipeOpts()), sp = ss.snipe;
     if (!sp) { requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price'); return false; }
     market.price = pick.price; market.fresh = pick.fresh; market.snipe = sp; market.checkedAt = Date.now();
     notePrice(searchedDefId() || stats.curDefId, searchLabel(), pick.price);
     stats.sinceCheck = 0; nextCheckAt = fuzzyCount(cfg.reprobeEvery, 0.2);
-    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (cfg.sellPrice > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
+    feed('Price ' + searchLabel() + ' ' + fmt(pick.price) + (pick.fresh ? '' : ' (no fresh)') + (mySell() > 0 ? ' · sell at ' + fmt(ss.sell) + ' (yours)' : '') + ' → snipe ≤ ' + fmt(sp) + ' · +' + fmt(profitAt(ss.sell, sp)), 'price');
+    if (sellAboveMarket()) feed('⚠ Your sell price ' + fmt(mySell()) + ' is ' + sellAboveMarket() + '% above today\u2019s price ' + fmt(pick.price) + ' - cards may not sell. Sell price on Auto = today\u2019s price.', 'stop');
     say('Sniping ' + searchLabel() + ' ≤ ' + fmt(sp));
     phase = 'running'; render();
     return true;
@@ -757,14 +762,19 @@
   function keepMaxNow() { return webMaxBuy() || (cfg.keepMax | 0); }
   function keepMinNow() { var c = webCrit(); return c && c.minBuy > 0 ? Number(c.minBuy) : (cfg.keepMin | 0); }
   // Where bought cards get listed: your manual sell price, else the checked market price.
-  function listPrice() { return cfg.sellPrice > 0 ? roundStep(cfg.sellPrice) : market.price; }
+  // Your own sell price counts only for the card it was set for (a 129k price must never carry
+  // over to the next player you search).
+  function mySell() { var d = searchedDefId(); return cfg.sellPrice > 0 && (!cfg.sellDef || !d || String(cfg.sellDef) === String(d)) ? cfg.sellPrice : 0; }
+  // Your sell price above today's market: say so (cards may not sell, and the profit is optimistic).
+  function sellAboveMarket() { var s = mySell(); return s > 0 && market.price > 0 && s > market.price * 1.02 ? Math.round((s / market.price - 1) * 100) : 0; }
+  function listPrice() { return mySell() > 0 ? roundStep(mySell()) : market.price; }
   // Sell price or target profit changed (also mid-run): move the snipe point with it.
   function applySell() {
     if (keepMode() || !(market.price > 0)) return;
-    var ss = sellAndSnipe(market.price, cfg.sellPrice, cfg.minProfit, snipeOpts());
+    var ss = sellAndSnipe(market.price, mySell(), cfg.minProfit, snipeOpts());
     if (!ss.snipe) return running && requestStop('target profit ' + fmt(cfg.minProfit) + ' is too high for a ' + fmt(ss.sell) + ' sell price');
     market.snipe = ss.snipe;
-    if (running) { feed('Sell at ' + fmt(ss.sell) + (cfg.sellPrice > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
+    if (running) { feed('Sell at ' + fmt(ss.sell) + (mySell() > 0 ? ' (yours)' : ' (auto)') + ' → snipe ≤ ' + fmt(ss.snipe) + ' · +' + fmt(profitAt(ss.sell, ss.snipe)), 'price'); say('Sniping ' + searchLabel() + ' ≤ ' + fmt(ss.snipe)); }
   }
   async function afterBuy(item) {
     if (!keepMode()) return relist(item);
@@ -1833,7 +1843,7 @@
     return section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins per card after EA\u2019s 5% tax.') +
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
-        segSetting('Profit counts from', 'snipeFrom', [['Your sell price', 1], ['Lower of sell / market', 0]], 'Your sell price: the bot buys up to sell price − 5% − target profit, so the profit is about your target. Lower of both: safer when your sell price is above the market, but the profit then comes out higher.') +
+        segSetting('Profit counts from', 'snipeFrom', [['Lower of sell / market', 0], ['Your sell price', 1]], 'Lower of both (safe): the snipe price never goes above today\u2019s price − 5% − profit. Your sell price: only if you are sure it sells at that price - above the market it buys at market price.') +
         segSetting('Profit tolerance', 'profitTol', [['0%', 0], ['±10%', 10], ['±20%', 20], ['±30%', 30]], 'Above 100k EA prices go in 1,000 steps, so a target of 850 can only be 550 or 1,550. The tolerance lets the bot pick the step closest to your target.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
@@ -2046,7 +2056,7 @@
     if (v == null) return;
     var n = String(v).trim() === '' ? 0 : parseCoins(v);
     if (n == null || (n > 0 && n < MIN_PRICE)) { blockMsg = 'Sell price not understood: "' + v + '"'; render(); return; }
-    cfg.sellPrice = n > 0 ? roundStep(n) : 0; save(); applySell(); blockMsg = ''; redrawTab();
+    cfg.sellPrice = n > 0 ? roundStep(n) : 0; cfg.sellDef = n > 0 ? (searchedDefId() || 0) : 0; save(); applySell(); blockMsg = ''; redrawTab();
   }
 
   // Tabs are only rebuilt when you switch tab; after changing what a tab shows, rebuild it now.
@@ -2087,7 +2097,7 @@
     el.addEventListener('input', function (e) { if (e.target && /^fs-pc-/.test(e.target.id || '')) { e.target.__typed = true; calcProfit(); } });
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) {
-      var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
+      var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice') cfg.sellDef = cfg.sellPrice > 0 ? (searchedDefId() || 0) : 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
     el.addEventListener('click', function (e) {
       // closest(): a tap on the subtitle <span> inside a button still counts as that button.
       var tg = e.target && e.target.closest ? e.target.closest('button,[data-tab],[data-sw]') : e.target;
@@ -2199,8 +2209,8 @@
     var wcb = webCrit(), webBid = wcb && wcb.maxBid > 0;
     T('fs-t-price', keep && bidMode() ? (webBid ? 'Max. Bid · web app' : webMaxBuy() ? 'Max. Buy Now · web app' : keepMaxNow() ? 'fallback' : 'set in web app') : keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
     T('fs-l-sell', keep ? 'Min price' : 'Sell at');
-    T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : market.price ? fmt(market.price) : 'Auto');
-    T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : cfg.sellPrice > 0 ? 'your price' : 'Auto · market');
+    T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : mySell() > 0 ? fmt(roundStep(mySell())) : market.price ? fmt(market.price) : 'Auto');
+    T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : mySell() > 0 ? (sellAboveMarket() ? sellAboveMarket() + '% over market' : 'your price') : 'Auto · market');
     T('fs-l-prof', keep ? 'Then' : 'Profit');
     T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
@@ -2210,7 +2220,7 @@
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
     T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
-    T('fs-sell-v', cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto');
+    T('fs-sell-v', mySell() > 0 ? fmt(roundStep(mySell())) : 'Auto');
     T('fs-r-prof-v', fmt(cfg.minProfit));
     T('fs-r-after-v', ['List', 'Transfer list', 'Unassigned'][cfg.afterBuy | 0] || 'List');
     T('fs-r-dur-v', durLabel(cfg.listDur));

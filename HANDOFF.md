@@ -113,3 +113,7 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 
 ### 5.6.0
 - Transfer list balance: bar above EA's transfer list (`#fs-tpbal`, shown when the rows on screen == requestTransferItems count) and a line in the Hub transfer list card: profit if every unsold card sells at its offered price (cost from ledger or lastSalePrice), cards with unknown cost / not listed counted separately (`listBalance`).
+
+### 5.6.1 – safety fix after a bad run
+- Live: sell price 129,000 (manual, from an earlier day) + 5.4.2 default "profit from your sell price" -> snipe 122,000 while the checked market was 123,000; two cards bought at 119k/120k.
+- Default back to "lower of sell / market" (one-time migration `mig560`, also resets an old untied sell price to Auto). A manual sell price now belongs to the card it was set for (`cfg.sellDef`, `mySell()`); another player = Auto. Price check warns when your sell price is >2% above the checked price.

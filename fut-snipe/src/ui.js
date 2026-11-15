@@ -176,7 +176,7 @@
     return section('Sniping',
         setting('Target profit per card', ctlNum('minProfit'), 'Coins per card after EA\u2019s 5% tax.') +
         setting('Sell price', ctlNum('sellPrice'), '0 = auto (checked market price).') +
-        segSetting('Profit counts from', 'snipeFrom', [['Your sell price', 1], ['Lower of sell / market', 0]], 'Your sell price: the bot buys up to sell price − 5% − target profit, so the profit is about your target. Lower of both: safer when your sell price is above the market, but the profit then comes out higher.') +
+        segSetting('Profit counts from', 'snipeFrom', [['Lower of sell / market', 0], ['Your sell price', 1]], 'Lower of both (safe): the snipe price never goes above today\u2019s price − 5% − profit. Your sell price: only if you are sure it sells at that price - above the market it buys at market price.') +
         segSetting('Profit tolerance', 'profitTol', [['0%', 0], ['±10%', 10], ['±20%', 20], ['±30%', 30]], 'Above 100k EA prices go in 1,000 steps, so a target of 850 can only be 550 or 1,550. The tolerance lets the bot pick the step closest to your target.') +
         segSetting('After buy', 'afterBuy', [['List', 0], ['Transfer list', 1], ['Unassigned', 2]], 'List = price check + relist. Transfer list / Unassigned = buys up to the Max. Buy Now of your web app search.') +
         segSetting('List for', 'listDur', LIST_DURS, '') +
@@ -389,7 +389,7 @@
     if (v == null) return;
     var n = String(v).trim() === '' ? 0 : parseCoins(v);
     if (n == null || (n > 0 && n < MIN_PRICE)) { blockMsg = 'Sell price not understood: "' + v + '"'; render(); return; }
-    cfg.sellPrice = n > 0 ? roundStep(n) : 0; save(); applySell(); blockMsg = ''; redrawTab();
+    cfg.sellPrice = n > 0 ? roundStep(n) : 0; cfg.sellDef = n > 0 ? (searchedDefId() || 0) : 0; save(); applySell(); blockMsg = ''; redrawTab();
   }
 
   // Tabs are only rebuilt when you switch tab; after changing what a tab shows, rebuild it now.
@@ -430,7 +430,7 @@
     el.addEventListener('input', function (e) { if (e.target && /^fs-pc-/.test(e.target.id || '')) { e.target.__typed = true; calcProfit(); } });
     el.addEventListener('input', function (e) { var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k || e.target.type !== 'range') return; cfg[k] = Number(e.target.value) || 0; var lab = el.querySelector('[data-sv="' + k + '"]'); if (lab) lab.textContent = cfg[k] + (e.target.getAttribute('data-unit') || ''); });
     el.addEventListener('change', function (e) {
-      var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
+      var k = e.target.getAttribute && e.target.getAttribute('data-k'); if (!k) return; cfg[k] = Number(e.target.value) || 0; if (k === 'sellPrice') cfg.sellDef = cfg.sellPrice > 0 ? (searchedDefId() || 0) : 0; if (k === 'sellPrice' || k === 'minProfit') applySell(); save(); render(); });
     el.addEventListener('click', function (e) {
       // closest(): a tap on the subtitle <span> inside a button still counts as that button.
       var tg = e.target && e.target.closest ? e.target.closest('button,[data-tab],[data-sw]') : e.target;
@@ -542,8 +542,8 @@
     var wcb = webCrit(), webBid = wcb && wcb.maxBid > 0;
     T('fs-t-price', keep && bidMode() ? (webBid ? 'Max. Bid · web app' : webMaxBuy() ? 'Max. Buy Now · web app' : keepMaxNow() ? 'fallback' : 'set in web app') : keep ? (webMaxBuy() ? 'from web app' : keepMaxNow() ? 'fallback' : 'set in web app') : market.price ? 'today ' + fmt(market.price) : phase === 'checking' ? 'checking…' : 'checked at start');
     T('fs-l-sell', keep ? 'Min price' : 'Sell at');
-    T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : market.price ? fmt(market.price) : 'Auto');
-    T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : cfg.sellPrice > 0 ? 'your price' : 'Auto · market');
+    T('fs-t-sell', keep ? (keepMinNow() > 0 ? fmt(keepMinNow()) : '—') : mySell() > 0 ? fmt(roundStep(mySell())) : market.price ? fmt(market.price) : 'Auto');
+    T('fs-t-sellsub', keep ? (keepMinNow() > 0 ? 'skips cheaper' : 'no minimum') : mySell() > 0 ? (sellAboveMarket() ? sellAboveMarket() + '% over market' : 'your price') : 'Auto · market');
     T('fs-l-prof', keep ? 'Then' : 'Profit');
     T('fs-t-prof', keep ? 'Keep' : (pr != null ? fmt(pr) : fmt(cfg.minProfit)) + '+');
     if ($('fs-t-prof')) $('fs-t-prof').className = keep ? '' : 'g';
@@ -553,7 +553,7 @@
     T('fs-r-speed-v', SPEEDS[cfg.speed | 0] || 'Normal');
     T('fs-r-bid-v', cfg.bidMode ? 'Bids' + (running && bidMode() ? ' · ' + openBids() + ' open' : '') : 'Buy Now');
     T('fs-r-when-v', phase === 'waiting' ? 'waiting · ' + startAt : startAt ? 'at ' + startAt : 'Now');
-    T('fs-sell-v', cfg.sellPrice > 0 ? fmt(roundStep(cfg.sellPrice)) : 'Auto');
+    T('fs-sell-v', mySell() > 0 ? fmt(roundStep(mySell())) : 'Auto');
     T('fs-r-prof-v', fmt(cfg.minProfit));
     T('fs-r-after-v', ['List', 'Transfer list', 'Unassigned'][cfg.afterBuy | 0] || 'List');
     T('fs-r-dur-v', durLabel(cfg.listDur));

@@ -4,7 +4,7 @@
   var DEFAULTS = {
     minProfit: 500, listDur: 3600, afterBuy: 0, keepMax: 0, keepMin: 0, tooManyStop: 1, rangeStop: 1, varyMinBid: 1, keepSpecials: 1, clearSold: 2, relistExpired: 1, repriceExpired: 1, packMin: 1000, badges: 1, sound: 1, vibrate: 1, speed: 1, runMinutes: 0,
     gapMinMs: 3500, gapMaxMs: 5500, buyGapMinMs: 500, buyGapMaxMs: 1100, sellPrice: 0,
-    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90, snipeFrom: 1, profitTol: 10
+    breakEvery: 30, breakSec: 90, sessionBuyCap: 15, dailyBuyCap: 150, reprobeEvery: 50, hubRange: 3, bidMode: 0, bidCap: 5, bidSecs: 90, snipeFrom: 0, profitTol: 10, sellDef: 0
   };
   var LIST_DURS = [['1h', 3600], ['3h', 10800], ['6h', 21600], ['12h', 43200], ['1d', 86400], ['3d', 259200]];
   var HARD_FLOOR_MS = 300;
@@ -13,6 +13,10 @@
   var cfg = load();
   // Auto/Custom switches (0 = Auto). Old saves with own values start on Custom.
   var rawCfg = {}; try { rawCfg = JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) {}
+  // 5.4.2 made 'profit from your sell price' the default: with a sell price above the market that
+  // buys at market price. Back to the safe 'lower of sell / market' once.
+  // An old sell price isn't tied to a card yet (it would apply to every player): back to Auto.
+  if (!rawCfg.mig560) { cfg.snipeFrom = 0; if (cfg.sellPrice > 0 && !cfg.sellDef) cfg.sellPrice = 0; cfg.mig560 = 1; }
   if (!('cRun' in rawCfg)) cfg.cRun = cfg.runMinutes > 0 ? 1 : 0;
   if (!('cCap' in rawCfg)) cfg.cCap = cfg.sessionBuyCap !== 15 ? 1 : 0;
   if (!('cCoins' in rawCfg)) cfg.cCoins = 0;
