@@ -107,3 +107,6 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 
 ### 5.5.2
 - Profit tags for hand-bought cards: cost = item.lastSalePrice (EA field, observed in sampleItemKeys; assumed = price paid while the card has not sold again). Row line-up no longer needs ledger entries. Diagnostics tpAlign.sample shows rating/state/buyNow/lastSalePrice of 4 items.
+
+### 5.5.3
+- Live 5.5.1 diag: hook render ran 308x but 0 rows got an item (item not the render arg / root not getRootElement) -> hook now searches the view's own fields for the item (id + definitionId/_auction) and the li.listFUTItem; logs `cellHook.keys` when it finds none. Row line-up: prices are read digits-only (iOS German "129.000" was read as 129), a row showing a price fits only a card listed at it, and when no row order fits, each row is tagged on its own if every fitting card has the same profit.

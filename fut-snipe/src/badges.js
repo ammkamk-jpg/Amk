@@ -24,7 +24,15 @@
         var orig = P.render;
         P.render = function (item) {
           var r = orig.apply(this, arguments); cellHook.calls++;
-          try { var root = (this.getRootElement && this.getRootElement()) || this.__root || this._root; if (root && item && item.id != null) { root.__fsItem = item; root.setAttribute('data-fs-id', String(item.id)); cellHook.withItem++; } } catch (e) {}
+          try {
+            // the item may be the argument or a field of the view; the row element likewise
+            var self = this, it = item && item.id != null && (item.definitionId != null || item._auction) ? item : null, root = null;
+            try { root = this.getRootElement && this.getRootElement(); } catch (e) {}
+            Object.keys(self).forEach(function (k) { var v = self[k]; if (!v || typeof v !== 'object') return; if (!it && v.id != null && v.definitionId != null && v._auction) it = v; if (!root && v.nodeType === 1 && v.classList && v.classList.contains('listFUTItem')) root = v; });
+            if (!root) root = this.__root || this._root;
+            if (root && it) { root.__fsItem = it; root.setAttribute('data-fs-id', String(it.id)); cellHook.withItem++; }
+            else if (cellHook.calls < 400 && !cellHook.keys) cellHook.keys = Object.keys(self).slice(0, 30).join(',') + ' | arg:' + (item && typeof item === 'object' ? Object.keys(item).slice(0, 8).join(',') : typeof item);
+          } catch (e) {}
           paintBadges(); return r;
         };
         P.__fsHooked = true;
@@ -40,12 +48,12 @@
   var tpAlign = { at: 0, busy: false, n: 0, ok: false, tried: 0 };
   function rowSig(row) {
     var r = row.querySelector('.playerOverview .rating'), nums = [], vs = row.querySelectorAll('.auction .value, .auctionValue .value, .auction .currency-coins');
-    for (var i = 0; i < vs.length; i++) { var v = parseCoins(vs[i].textContent.trim()); if (v > 0) nums.push(v); }
+    for (var i = 0; i < vs.length; i++) { var v = Number(String(vs[i].textContent).replace(/\D/g, '')); if (v > 0) nums.push(v); } // '129.000' / '129,000'
     return { rating: r ? Number(r.textContent.trim()) || null : null, nums: nums };
   }
   function sigMatch(sig, it) {
     var rt = ratingOf(it); if (sig.rating && rt && sig.rating !== rt) return false;
-    var bn = (it._auction || {}).buyNowPrice; if (sig.nums.length && bn > 0 && sig.nums.indexOf(bn) < 0) return false;
+    var bn = (it._auction || {}).buyNowPrice; if (sig.nums.length && !(bn > 0 && sig.nums.indexOf(bn) >= 0)) return false; // a row that shows a price fits only a card listed at it
     return true;
   }
   function tpOrders(items) {
@@ -70,7 +78,16 @@
       var cands = tpOrders(items);
       for (var c = 0; c < cands.length; c++) {
         var ok = true; for (var j = 0; j < rows.length && ok; j++) ok = sigMatch(sigs[j], cands[c][j]);
-        if (ok) { for (var k = 0; k < rows.length; k++) rows[k].__fsGuess = cands[c][k]; tpAlign.ok = true; break; }
+        if (ok) { for (var k = 0; k < rows.length; k++) rows[k].__fsGuess = cands[c][k]; tpAlign.ok = 'order'; break; }
+      }
+      if (!tpAlign.ok) { // order unknown: a row gets a tag only if every card that fits it has the same profit
+        var tagged = 0;
+        for (var m = 0; m < rows.length; m++) {
+          var fit = items.filter(function (it) { return sigMatch(sigs[m], it); }); if (!fit.length) continue;
+          var key = function (it) { var p = rowProfit(it); return p ? String(p.profit) : 'none'; }, k0 = key(fit[0]);
+          if (fit.every(function (it) { return key(it) === k0; })) { rows[m].__fsGuess = fit[0]; if (k0 !== 'none') tagged++; }
+        }
+        tpAlign.ok = 'per-row'; tpAlign.tagged = tagged;
       }
       paintBadges();
     }, function () { tpAlign.busy = false; });
