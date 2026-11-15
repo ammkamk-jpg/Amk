@@ -88,3 +88,7 @@ User wants a slot-machine-style animated anime character in the bot: idles in a 
 - Max bid: web search Max. Bid, else Max. Buy Now (keep modes); checked snipe price in List mode.
 - `settleBids`: 8 s after an auction ends, reads the watchlist once; won → counted like a buy, then `afterBuy` (list / move); lost → `untarget([item])`. Stop leaves open bids in the watchlist (said in the stop message).
 - `requestWatchedItems` / `untarget` signatures unverified on the live app.
+
+### 5.4.1
+- Feed: searches without a hit are "quiet" lines, only the last 3 stay (with the search number). Hits, fails and stops stay.
+- List-many form: label above a full-width field (EA's global input CSS squeezed the labels on iOS).

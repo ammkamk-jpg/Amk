@@ -175,7 +175,7 @@
       if (stats.buys >= buyCapNow()) return;
       await sleep(Math.max(HARD_FLOOR_MS, rand(cfg.buyGapMinMs, cfg.buyGapMaxMs)));
     }
-    if (!bought) { feed(searchLabel() + ' not found', 'miss'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
+    if (!bought) { feed(searchLabel() + ' not found · search ' + stats.searches, 'quiet'); setActivity('Sniping ' + searchLabel() + ' ≤ ' + fmt(market.snipe)); }
   }
 
   // ---------- Auto bidder: bid on auctions about to end, collect the won cards ----------

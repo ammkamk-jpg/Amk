@@ -22,18 +22,21 @@
   function setActivity(m) { activity = m; ['fs-act', 'fs-l-act'].forEach(function (id) { var el = document.getElementById(id); if (el) el.textContent = m; }); }
   // Live feed: one line per search ("Player not found  14:03:22"), newest on top. Keeps the
   // last FEED_MAX lines (older ones drop off quietly) and can be scrolled.
-  var feedLines = [], FEED_MAX = 200;
+  var feedLines = [], FEED_MAX = 200, QUIET_MAX = 3; // 'quiet' = searches without a hit: only the last 3 stay
   function clock() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }
   function feedHTML(l) { return '<div class="fs-fl ' + l.kind + '"><span class="tx">' + esc(l.text) + '</span><span class="tm">' + l.time + '</span></div>'; }
   // Every event, once: a line in the feed and the same line in the console.
   function feed(text, kind) {
     var l = { text: text, kind: kind || 'miss', time: clock() };
-    feedLines.unshift(l); if (feedLines.length > FEED_MAX) feedLines.length = FEED_MAX;
+    feedLines.unshift(l);
+    if (l.kind === 'quiet') { var q = 0; feedLines = feedLines.filter(function (x) { return x.kind !== 'quiet' || ++q <= QUIET_MAX; }); }
+    if (feedLines.length > FEED_MAX) feedLines.length = FEED_MAX;
     try { console.log('[TangaTolga] ' + text + '  ' + l.time); } catch (e) {}
     var boxes = document.querySelectorAll('.fs-feed');
     for (var i = 0; i < boxes.length; i++) {
       var bx = boxes[i], keep = bx.scrollTop > 4 ? bx.scrollHeight - bx.scrollTop : null; // reading older lines: don't jump
       bx.insertAdjacentHTML('afterbegin', feedHTML(l));
+      if (l.kind === 'quiet') { var qs = bx.querySelectorAll('.fs-fl.quiet'); for (var j = QUIET_MAX; j < qs.length; j++) bx.removeChild(qs[j]); }
       while (bx.children.length > FEED_MAX) bx.removeChild(bx.lastChild);
       if (keep != null) bx.scrollTop = bx.scrollHeight - keep;
     }

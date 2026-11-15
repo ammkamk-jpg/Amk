@@ -137,7 +137,10 @@
     // bulk list
     '.fs-bk-head{display:flex;align-items:center;gap:6px;margin:0 0 12px}.fs-bk-head b{font-size:18px;font-weight:700;flex:1;text-align:center;margin-right:64px}' +
     '.fs-bk-back{border:0;background:transparent;color:' + C_CYAN + ';padding:6px 0;font-size:17px;width:64px;text-align:left}' +
-    '.fs-bk-card{padding:8px 16px 8px;border-radius:18px}' +
+    '.fs-bk-card{padding:8px 16px 8px;border-radius:18px;overflow:hidden}' +
+    // label on top, full-width field below (EA\u2019s own input styles can\u2019t squeeze the label)
+    '.fs-bk-card .fs-set .top{flex-direction:column;align-items:stretch;gap:8px}.fs-bk-card .fs-set .nm{white-space:nowrap}' +
+    '.fs-bk-card .fs-num{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;margin:0!important;height:auto!important;-webkit-appearance:none;appearance:none;text-align:left}' +
     '.fs-bkg{width:100%;text-align:left;justify-content:space-between}' +
     '.fs-bkg .nm{font-weight:600;font-size:16px}.fs-bkg i,.fs-bk-sel i{font-style:normal;color:' + C_MUT + ';font-weight:500}.fs-bkg .ct{font-size:13px;color:' + C_MUT + '}.fs-bkg .ct b{font-size:16px;color:' + C_TXT + ';font-weight:800}' +
     '.fs-bk-sel{font-weight:800;font-size:22px;display:flex;align-items:baseline;gap:8px;padding:8px 0 8px}.fs-bk-sel span{margin-left:auto;font-size:13px;color:' + C_MUT + ';font-weight:500}' +
@@ -166,7 +169,7 @@
     '.fs-fl{flex:none;display:flex;align-items:center;gap:10px;padding:10px 14px;background:' + C_CARD + ';border:1px solid ' + C_LINE + ';border-radius:12px;color:' + C_TXT + ';font-size:13.5px;line-height:1.3}' +
     '.fs-fl .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fs-fl .tm{color:' + C_MUT2 + ';font-size:12px;' + NUM + '}' +
     '.fs-fl:before{content:"";width:7px;height:7px;border-radius:50%;background:' + C_CARD3 + ';flex:none}' +
-    '.fs-fl.check:before{background:' + C_ORANGE + '}.fs-fl.price:before,.fs-fl.list:before{background:' + C_CYAN + '}.fs-fl.stop:before{background:' + C_RED + '}' +
+    '.fs-fl.quiet{color:' + C_MUT + '}.fs-fl.check:before{background:' + C_ORANGE + '}.fs-fl.price:before,.fs-fl.list:before{background:' + C_CYAN + '}.fs-fl.stop:before{background:' + C_RED + '}' +
     '.fs-fl.hit{font-weight:700;border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.08)}.fs-fl.hit:before{background:' + C_OK + '}.fs-fl.hit .tx{color:' + C_OK + '}' +
     // purchase banner
     '#fs-toast{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));z-index:2147483647;width:min(92vw,420px);transform:translate(-50%,-140%);transition:transform .45s cubic-bezier(.2,.9,.25,1);display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:rgba(26,32,48,.97);border:1px solid rgba(74,222,128,.35);box-shadow:0 12px 30px rgba(0,0,0,.45);color:#fff;font:15px/1.3 ' + FONT + ';pointer-events:none}' +
