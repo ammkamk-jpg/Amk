@@ -38,3 +38,7 @@ Don't re-push the whole file each time. First task after "go": split the script 
 
 ## Suggested second message (after the new session replies)
 > go. Answers: use the 2nd-cheapest fresh listing as the market price; buy anything at or below the snipe point; default relist duration 1h. First split the script into small files, then build the one-button flow.
+
+## TangaTV (`tv/index.html`, branch `tv`)
+Own IPTV player web app (single file, no build). M3U by link / file / paste, Xtream (player_api.php live categories + streams -> `/live/u/p/id.m3u8`), XMLTV guide (url-tvg / Xtream xmltv.php, .gz via DecompressionStream, only now-3h..+36h and wanted ids kept), groups, search, favourites, recent, virtual list (20k+ channels), player with native HLS (Safari, new Chrome) or hls.js 1.5.13 from cdnjs, PiP, AirPlay, fullscreen, swipe / arrow keys to zap, TV-remote keys. Sources in localStorage, lists + guide in IndexedDB.
+Limits: http:// streams can't play on an https page (mixed content) -> VLC / Infuse / copy-link fallback; servers without CORS can't be loaded by link (use Datei). Catch-up not built yet.

@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
+<title>TangaTV</title>
+<style>
+:root{
+  --bg:#0d1117;--card:#161b24;--card2:#1e2531;--card3:#283141;--line:rgba(255,255,255,.07);
+  --txt:#f2f4f8;--mut:rgba(235,238,245,.6);--mut2:rgba(235,238,245,.35);
+  --acc:#5ac8f5;--ok:#4ade80;--red:#f87171;--gold:#e8c766;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:15px/1.35 var(--font)}
+body{overscroll-behavior:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--txt);background:#0a0e14;border:1px solid var(--line);border-radius:12px;padding:11px 13px;width:100%;outline:none}
+input:focus,textarea:focus{border-color:var(--acc)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.hidden{display:none!important}
+
+/* ---------- top ---------- */
+#top{position:sticky;top:0;z-index:5;background:rgba(13,17,23,.92);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#1f6f99,#5ac8f5);display:flex;align-items:center;justify-content:center;flex:none}
+.logo svg{width:20px;height:20px}
+h1{font-size:21px;font-weight:800;letter-spacing:-.4px;margin:0;flex:1}
+.ibtn{width:38px;height:38px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
+.ibtn svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+#q{margin-top:10px;padding-left:38px;background:#0a0e14 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa3b2' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") 12px 50%/17px no-repeat}
+#chips{display:flex;gap:7px;overflow-x:auto;margin:10px -16px 0;padding:0 16px 2px;scrollbar-width:none}
+#chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:7px 13px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--mut);font-size:13.5px;font-weight:600;white-space:nowrap}
+.chip.on{background:var(--acc);color:#06212e;border-color:var(--acc)}
+.chip b{font-weight:500;opacity:.7;margin-left:5px}
+
+/* ---------- channel list (virtual) ---------- */
+#list{position:relative}
+.row{position:absolute;left:0;right:0;height:68px;display:flex;align-items:center;gap:13px;padding:0 16px;text-align:left;width:100%}
+.row:after{content:"";position:absolute;left:83px;right:0;bottom:0;border-bottom:1px solid var(--line)}
+.row:active,.row:focus-visible{background:var(--card)}
+.row:focus-visible{outline:none;box-shadow:inset 3px 0 0 var(--acc)}
+.lg{width:54px;height:40px;border-radius:9px;background:var(--card2);flex:none;display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;font-size:13px;color:var(--mut)}
+.lg img{max-width:100%;max-height:100%;object-fit:contain}
+.ri{flex:1;min-width:0}
+.rn{display:block;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp{display:block;font-size:12.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.pg{display:block;height:3px;border-radius:2px;background:var(--card3);margin-top:5px;overflow:hidden}.pg i{display:block;height:100%;background:var(--acc)}
+.star{width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:var(--mut2);flex:none}
+.star svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8}
+.star.on{color:var(--gold)}.star.on svg{fill:currentColor}
+.empty{padding:60px 28px;text-align:center;color:var(--mut)}
+.empty b{display:block;color:var(--txt);font-size:18px;margin-bottom:6px}
+.empty .btn{margin-top:18px}
+
+/* ---------- buttons, sheets ---------- */
+.btn{display:block;width:100%;padding:14px;border-radius:14px;background:var(--acc);color:#06212e;font-weight:750;text-align:center}
+.btn.sec{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+.btn.red{background:rgba(248,113,113,.14);color:var(--red)}
+.btn+.btn{margin-top:9px}
+#sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+#sheet .in{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:var(--bg);border:1px solid var(--line);border-bottom:0;border-radius:22px 22px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 18px)}
+.sh{display:flex;align-items:center;gap:10px;margin-bottom:12px}.sh b{flex:1;font-size:19px}
+.seg{display:flex;gap:3px;padding:3px;background:#0a0e14;border:1px solid var(--line);border-radius:12px;margin-bottom:12px}
+.seg button{flex:1;padding:9px 4px;border-radius:9px;color:var(--mut);font-weight:650;font-size:13.5px}.seg button.on{background:var(--card3);color:var(--txt)}
+.fld{margin-bottom:10px}.fld label{display:block;font-size:12.5px;color:var(--mut);margin:0 2px 5px}
+.hint{font-size:12.5px;color:var(--mut);margin:4px 2px 12px;line-height:1.45}
+.src{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:9px;display:flex;align-items:center;gap:10px}
+.src .ri small{display:block;color:var(--mut);font-size:12.5px;margin-top:2px}
+.src .mini{padding:8px 11px;border-radius:10px;background:var(--card2);font-size:13px;font-weight:650}
+.sect{font-size:12.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:18px 2px 8px}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 18px);transform:translateX(-50%);z-index:40;background:var(--card3);border:1px solid var(--line);border-radius:14px;padding:11px 16px;font-size:14px;max-width:88vw;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+
+/* ---------- player ---------- */
+#player{position:fixed;inset:0;z-index:30;background:#000;display:flex;flex-direction:column}
+#player video{position:absolute;inset:0;width:100%;height:100%;background:#000;object-fit:contain}
+.pov{position:absolute;left:0;right:0;z-index:2;transition:opacity .25s}
+#ptop{top:0;padding:calc(env(safe-area-inset-top) + 10px) 14px 26px;background:linear-gradient(rgba(0,0,0,.75),transparent);display:flex;align-items:center;gap:10px}
+#ptop .t{flex:1;min-width:0}#ptop .t b{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#ptop .t small{color:var(--mut);font-size:12.5px}
+#pbot{bottom:0;padding:30px 16px calc(env(safe-area-inset-bottom) + 14px);background:linear-gradient(transparent,rgba(0,0,0,.85))}
+.pbtn{width:42px;height:42px;border-radius:13px;background:rgba(255,255,255,.12);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;flex:none}
+.pbtn svg{width:21px;height:21px;stroke:#fff;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.now{font-weight:700;font-size:15px}.nxt{color:var(--mut);font-size:13px;margin-top:3px}
+.prow{display:flex;gap:9px;align-items:center;margin-top:12px}.prow .sp{flex:1}
+#pmsg{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;text-align:center;padding:30px;color:var(--mut)}
+#pmsg .spin{width:38px;height:38px;border-radius:50%;border:3px solid rgba(255,255,255,.15);border-top-color:var(--acc);animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#pmsg .err{max-width:420px;background:rgba(20,24,32,.92);border:1px solid var(--line);border-radius:16px;padding:16px;color:var(--txt);font-size:14px}
+#pmsg .err b{display:block;font-size:16px;margin-bottom:6px}
+#pmsg .err .links{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+#pmsg .err .links a,#pmsg .err .links button{padding:9px 12px;border-radius:10px;background:var(--card3);color:var(--txt);text-decoration:none;font-size:13.5px;font-weight:650}
+#player.idle .pov{opacity:0;pointer-events:none}
+@media (min-width:900px){ .row{padding:0 28px} #top{padding-left:28px;padding-right:28px} }
+</style>
+</head>
+<body>
+<div id="top">
+  <div class="bar">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="m8 2 4 4 4-4"/></svg></div>
+    <h1>TangaTV</h1>
+    <button class="ibtn" id="b-src" aria-label="Quellen"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg></button>
+  </div>
+  <input id="q" type="search" placeholder="Sender suchen" autocomplete="off" enterkeyhint="search">
+  <div id="chips"></div>
+</div>
+<div id="list"></div>
+
+<div id="player" class="hidden">
+  <video id="v" playsinline webkit-playsinline x-webkit-airplay="allow" autoplay></video>
+  <div id="pmsg"></div>
+  <div class="pov" id="ptop">
+    <button class="pbtn" id="p-back" aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="lg" id="p-logo"></div>
+    <div class="t"><b id="p-name"></b><small id="p-grp"></small></div>
+    <button class="pbtn" id="p-fav" aria-label="Favorit"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></button>
+  </div>
+  <div class="pov" id="pbot">
+    <div class="now" id="p-now"></div><div class="nxt" id="p-next"></div>
+    <div class="pg" id="p-pg" style="margin-top:9px"><i></i></div>
+    <div class="prow">
+      <button class="pbtn" id="p-prev" aria-label="Vorheriger Sender"><svg viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg></button>
+      <button class="pbtn" id="p-nextch" aria-label="Nächster Sender"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="sp"></div>
+      <button class="pbtn" id="p-mute" aria-label="Ton"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+      <button class="pbtn hidden" id="p-air" aria-label="AirPlay"><svg viewBox="0 0 24 24"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7z"/></svg></button>
+      <button class="pbtn hidden" id="p-pip" aria-label="Bild in Bild"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg></button>
+      <button class="pbtn" id="p-full" aria-label="Vollbild"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<div id="sheet" class="hidden"><div class="in" id="sheet-in"></div></div>
+<div id="toast" class="hidden"></div>
+
+<script>
+(function () {
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+var toastT = null;
+function toast(m, ms) { var t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(function () { t.classList.add('hidden'); }, ms || 2600); }
+
+// ================= parsing (pure, tested) =================
+// M3U / M3U8 playlist: #EXTM3U (url-tvg), #EXTINF:-1 attr="..",Name, #EXTGRP, then the URL.
+function parseAttrs(s) { var o = {}, re = /([\w-]+)="([^"]*)"/g, m; while ((m = re.exec(s))) o[m[1].toLowerCase()] = m[2]; return o; }
+function splitInf(rest) { // the name starts after the first comma outside quotes
+  var q = false; for (var i = 0; i < rest.length; i++) { var c = rest[i]; if (c === '"') q = !q; else if (c === ',' && !q) return [rest.slice(0, i), rest.slice(i + 1)]; }
+  return [rest, ''];
+}
+function parseM3U(text) {
+  var lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/), out = [], epg = '', cur = null, grp = '';
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i].trim(); if (!l) continue;
+    if (/^#EXTM3U/i.test(l)) { var h = parseAttrs(l); epg = h['url-tvg'] || h['x-tvg-url'] || h['tvg-url'] || epg; continue; }
+    if (/^#EXTINF/i.test(l)) {
+      var parts = splitInf(l.replace(/^#EXTINF:\s*-?\d+(\.\d+)?\s*/i, '')), a = parseAttrs(parts[0]);
+      cur = { name: (parts[1] || a['tvg-name'] || '').trim() || a['tvg-name'] || 'Kanal', id: a['tvg-id'] || '', tvgName: a['tvg-name'] || '', logo: a['tvg-logo'] || '', group: a['group-title'] || '', catchup: a['catchup'] || a['catchup-type'] || '', catchupDays: Number(a['catchup-days'] || a['tvg-rec'] || 0) || 0 };
+      grp = ''; continue;
+    }
+    if (/^#EXTGRP:/i.test(l)) { grp = l.slice(8).trim(); continue; }
+    if (l.charAt(0) === '#') continue;
+    var ch = cur || { name: l.split('/').pop() || 'Kanal', id: '', tvgName: '', logo: '', group: '', catchup: '', catchupDays: 0 };
+    if (!ch.group) ch.group = grp || 'Ohne Gruppe';
+    ch.url = l; out.push(ch); cur = null; grp = '';
+  }
+  return { channels: out, epg: epg };
+}
+// XMLTV time "20261119203000 +0100" -> ms
+function xmltvTime(s) {
+  var m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-]\d{4})?/); if (!m) return NaN;
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  if (m[7]) { var sg = m[7][0] === '-' ? -1 : 1, oh = +m[7].slice(1, 3), om = +m[7].slice(3, 5); t -= sg * (oh * 60 + om) * 60000; }
+  return t;
+}
+function unxml(s) { return String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, function (_, n) { return String.fromCharCode(+n); }).replace(/&amp;/g, '&').trim(); }
+// XMLTV guide -> {programmes: {channelId: [{s, e, t, d}]}, names: {lowercased display-name: id}}.
+// Only programmes inside [from, to] (and, if given, only wanted channel ids) are kept, so a big
+// guide doesn't fill the memory.
+function parseXMLTV(xml, from, to, want) {
+  var progs = {}, names = {}, m;
+  var reC = /<channel\b[^>]*\bid="([^"]*)"[^>]*>([\s\S]*?)<\/channel>/g;
+  while ((m = reC.exec(xml))) { var dn = /<display-name[^>]*>([\s\S]*?)<\/display-name>/g, d; while ((d = dn.exec(m[2]))) names[unxml(d[1]).toLowerCase()] = unxml(m[1]); }
+  var reP = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
+  while ((m = reP.exec(xml))) {
+    var a = parseAttrs(m[1]), id = unxml(a.channel || ''); if (!id || (want && !want[id])) continue;
+    var s = xmltvTime(a.start), e = xmltvTime(a.stop); if (!(e > from) || !(s < to)) continue;
+    var tt = /<title[^>]*>([\s\S]*?)<\/title>/.exec(m[2]), ds = /<desc[^>]*>([\s\S]*?)<\/desc>/.exec(m[2]);
+    (progs[id] = progs[id] || []).push({ s: s, e: e, t: tt ? unxml(tt[1]) : '', d: ds ? unxml(ds[1]).slice(0, 300) : '' });
+  }
+  Object.keys(progs).forEach(function (k) { progs[k].sort(function (x, y) { return x.s - y.s; }); });
+  return { programmes: progs, names: names };
+}
+// now / next of one channel's programme list
+function nowNext(list, t) {
+  if (!list) return null;
+  for (var i = 0; i < list.length; i++) if (list[i].s <= t && list[i].e > t) return { now: list[i], next: list[i + 1] || null };
+  for (var j = 0; j < list.length; j++) if (list[j].s > t) return { now: null, next: list[j] };
+  return null;
+}
+// Xtream Codes: server address as typed -> base URL; channel list from the API's live streams
+function xtBase(host) { var h = String(host || '').trim().replace(/\/+$/, '').replace(/\/(player_api\.php|get\.php).*$/i, ''); if (h && !/^https?:\/\//i.test(h)) h = 'http://' + h; return h; }
+function xtChannels(base, user, pass, cats, streams) {
+  var cn = {}; (cats || []).forEach(function (c) { cn[String(c.category_id)] = c.category_name; });
+  return (streams || []).map(function (s) {
+    return { name: s.name || 'Kanal', id: s.epg_channel_id || '', tvgName: s.name || '', logo: s.stream_icon || '', group: cn[String(s.category_id)] || 'Ohne Gruppe',
+      url: base + '/live/' + encodeURIComponent(user) + '/' + encodeURIComponent(pass) + '/' + s.stream_id + '.m3u8', catchup: s.tv_archive ? 'xc' : '', catchupDays: Number(s.tv_archive_duration) || 0 };
+  });
+}
+window.__tv = { parseM3U: parseM3U, parseXMLTV: parseXMLTV, xmltvTime: xmltvTime, nowNext: nowNext, xtBase: xtBase, xtChannels: xtChannels };
+
+// ================= storage =================
+// Sources (small) in localStorage; channel lists and guides (big) in IndexedDB.
+var SRC_KEY = 'tangatv.sources', FAV_KEY = 'tangatv.favs', REC_KEY = 'tangatv.recent', UI_KEY = 'tangatv.ui';
+var sources = lsGet(SRC_KEY, []), favs = lsGet(FAV_KEY, {}), recent = lsGet(REC_KEY, []), ui = lsGet(UI_KEY, { group: 'all' });
+var db = null;
+function idb() {
+  if (db) return Promise.resolve(db);
+  return new Promise(function (res, rej) {
+    try { var r = indexedDB.open('tangatv', 1); r.onupgradeneeded = function () { r.result.createObjectStore('kv'); }; r.onsuccess = function () { db = r.result; res(db); }; r.onerror = function () { rej(r.error); }; }
+    catch (e) { rej(e); }
+  });
+}
+function kvGet(k) { return idb().then(function (d) { return new Promise(function (res) { var q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { res(null); }; }); }).catch(function () { return null; }); }
+function kvSet(k, v) { return idb().then(function (d) { return new Promise(function (res) { var tx = d.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = function () { res(true); }; tx.onerror = function () { res(false); }; }); }).catch(function () { return false; }); }
+function kvDel(k) { return idb().then(function (d) { d.transaction('kv', 'readwrite').objectStore('kv').delete(k); }).catch(function () {}); }
+
+// ================= loading sources =================
+function fetchText(url, ms) {
+  var ctl = window.AbortController ? new AbortController() : null, to = setTimeout(function () { if (ctl) ctl.abort(); }, ms || 30000);
+  return fetch(url, { signal: ctl ? ctl.signal : undefined }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var gz = /\.gz(\?|$)/i.test(url) || /gzip/i.test(r.headers.get('content-type') || '');
+    if (gz && window.DecompressionStream && r.body) return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text();
+    return r.text();
+  }).finally(function () { clearTimeout(to); });
+}
+function whyFailed(url, e) {
+  if (location.protocol === 'https:' && /^http:/i.test(url)) return 'Die Adresse ist http://, diese Seite läuft über https://. Browser blockieren das (gemischte Inhalte). Lade die Liste als Datei, oder nutze eine https-Adresse.';
+  if (/HTTP \d/.test(String(e))) return 'Der Server antwortet mit ' + String(e.message || e) + '.';
+  return 'Der Server erlaubt keinen Abruf aus dem Browser (CORS) oder ist nicht erreichbar. Lade die Liste als Datei herunter und wähle sie unter „Datei“.';
+}
+async function loadSource(src) {
+  var res;
+  if (src.type === 'xtream') {
+    var base = xtBase(src.host), q = '/player_api.php?username=' + encodeURIComponent(src.user) + '&password=' + encodeURIComponent(src.pass);
+    var cats = JSON.parse(await fetchText(base + q + '&action=get_live_categories'));
+    var streams = JSON.parse(await fetchText(base + q + '&action=get_live_streams', 60000));
+    if (!Array.isArray(streams)) throw new Error('Login falsch oder kein Live-TV in diesem Zugang');
+    res = { channels: xtChannels(base, src.user, src.pass, cats, streams), epg: src.epg || (base + '/xmltv.php?username=' + encodeURIComponent(src.user) + '&password=' + encodeURIComponent(src.pass)) };
+  } else if (src.type === 'url') {
+    res = parseM3U(await fetchText(src.url, 60000)); if (src.epg) res.epg = src.epg;
+  } else {
+    res = parseM3U(src.text || ''); if (src.epg) res.epg = src.epg;
+  }
+  if (!res.channels.length) throw new Error('Keine Sender in dieser Liste gefunden');
+  res.channels.forEach(function (c) { c.src = src.id; c.key = src.id + '|' + c.url; });
+  await kvSet('list:' + src.id, res.channels);
+  src.count = res.channels.length; src.at = Date.now(); src.epgUrl = res.epg || ''; src.err = '';
+  if (src.type === 'file') delete src.text; // the parsed list lives in IndexedDB
+  lsSet(SRC_KEY, sources);
+  return res.channels;
+}
+
+// ================= state =================
+var all = [], view = [], epg = { programmes: {}, names: {} }, curIdx = -1, curList = null;
+async function loadAll() {
+  var lists = await Promise.all(sources.map(function (s) { return kvGet('list:' + s.id); }));
+  all = [].concat.apply([], lists.map(function (l) { return l || []; }));
+  var g = await kvGet('epg'); if (g && g.programmes) epg = g;
+  render();
+  refreshEpg(false);
+}
+function epgFor(ch) {
+  var id = ch.id && epg.programmes[ch.id] ? ch.id : (epg.names[(ch.tvgName || ch.name || '').toLowerCase()] || ch.id);
+  return nowNext(epg.programmes[id], Date.now());
+}
+var epgBusy = false;
+async function refreshEpg(force) {
+  var urls = sources.map(function (s) { return s.epgUrl || s.epg; }).filter(Boolean).filter(function (u, i, a) { return a.indexOf(u) === i; });
+  if (!urls.length || epgBusy) return;
+  var last = lsGet('tangatv.epgAt', 0); if (!force && Date.now() - last < 6 * 3600000 && Object.keys(epg.programmes).length) return;
+  epgBusy = true;
+  var want = {}; all.forEach(function (c) { if (c.id) want[c.id] = 1; });
+  var from = Date.now() - 3 * 3600000, to = Date.now() + 36 * 3600000, merged = { programmes: {}, names: {} }, okN = 0;
+  for (var i = 0; i < urls.length; i++) {
+    try {
+      var xml = await fetchText(urls[i], 90000);
+      if (xml.length > 120e6) { toast('Programmführer zu groß für den Browser (' + Math.round(xml.length / 1e6) + ' MB)'); continue; }
+      var g = parseXMLTV(xml, from, to, Object.keys(want).length ? want : null);
+      Object.assign(merged.programmes, g.programmes); Object.assign(merged.names, g.names); okN++;
+    } catch (e) { /* guide is optional */ }
+  }
+  epgBusy = false;
+  if (okN) { epg = merged; kvSet('epg', merged); lsSet('tangatv.epgAt', Date.now()); render(); }
+}
+
+// ================= list view =================
+function chKey(c) { return c.key || (c.src + '|' + c.url); }
+function groups() { var seen = {}, out = []; all.forEach(function (c) { if (!seen[c.group]) { seen[c.group] = 0; out.push(c.group); } seen[c.group]++; }); return { names: out, counts: seen }; }
+function filtered() {
+  var q = $('q').value.trim().toLowerCase(), g = ui.group, list;
+  if (g === 'fav') list = all.filter(function (c) { return favs[chKey(c)]; });
+  else if (g === 'recent') { var by = {}; all.forEach(function (c) { by[chKey(c)] = c; }); list = recent.map(function (k) { return by[k]; }).filter(Boolean); }
+  else if (g === 'all') list = all;
+  else list = all.filter(function (c) { return c.group === g; });
+  if (q) list = list.filter(function (c) { return c.name.toLowerCase().indexOf(q) >= 0 || (c.group || '').toLowerCase().indexOf(q) >= 0; });
+  return list;
+}
+function renderChips() {
+  var gs = groups(), favN = all.filter(function (c) { return favs[chKey(c)]; }).length;
+  var chip = function (id, label, n) { return '<button class="chip' + (ui.group === id ? ' on' : '') + '" data-g="' + esc(id) + '">' + esc(label) + (n != null ? '<b>' + n + '</b>' : '') + '</button>'; };
+  var h = chip('all', 'Alle', all.length) + (favN ? chip('fav', '★ Favoriten', favN) : '') + (recent.length ? chip('recent', 'Zuletzt', null) : '') +
+    gs.names.map(function (g) { return chip(g, g, gs.counts[g]); }).join('');
+  if ($('chips').__h !== h) { $('chips').__h = h; $('chips').innerHTML = h; }
+}
+var ROW_H = 68;
+function render() {
+  if (ui.group !== 'all' && ui.group !== 'fav' && ui.group !== 'recent' && !all.some(function (c) { return c.group === ui.group; })) ui.group = 'all';
+  renderChips();
+  view = filtered();
+  var L = $('list');
+  if (!all.length) {
+    L.style.height = ''; L.innerHTML = '<div class="empty"><b>Noch keine Sender</b>Füge eine M3U-Playlist oder einen Xtream-Zugang hinzu. TangaTV ist nur ein Player und liefert selbst keine Sender.' +
+      '<button class="btn" id="e-add">Quelle hinzufügen</button><button class="btn sec" id="e-demo">Freie deutsche Sender testen</button></div>';
+    return;
+  }
+  if (!view.length) { L.style.height = ''; L.innerHTML = '<div class="empty"><b>Nichts gefunden</b>' + (ui.group === 'fav' ? 'Tippe auf den Stern bei einem Sender.' : 'Andere Suche oder Gruppe probieren.') + '</div>'; return; }
+  L.innerHTML = ''; L.__rows = {}; L.style.height = (view.length * ROW_H) + 'px';
+  paintRows(true);
+}
+function rowHTML(c, i) {
+  var nn = epgFor(c), now = nn && nn.now, pct = now ? Math.max(0, Math.min(100, (Date.now() - now.s) / (now.e - now.s) * 100)) : 0;
+  var ini = esc((c.name.replace(/[^\p{L}\p{N} ]/gu, '').trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join('') || 'TV').toUpperCase());
+  return '<button class="row" data-i="' + i + '" style="top:' + (i * ROW_H) + 'px">' +
+    '<span class="lg">' + (c.logo ? '<img loading="lazy" referrerpolicy="no-referrer" src="' + esc(c.logo) + '" alt="" onerror="this.replaceWith(document.createTextNode(\'' + ini + '\'))">' : ini) + '</span>' +
+    '<span class="ri"><span class="rn">' + esc(c.name) + '</span><span class="rp">' + (now ? esc(now.t) : nn && nn.next ? 'Gleich: ' + esc(nn.next.t) : esc(c.group)) + '</span>' + (now ? '<span class="pg"><i style="width:' + pct.toFixed(0) + '%"></i></span>' : '') + '</span>' +
+    '<span class="star' + (favs[chKey(c)] ? ' on' : '') + '" data-star="' + i + '" role="button" aria-label="Favorit"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></span></button>';
+}
+// Only the rows on screen exist (lists can have 20,000+ channels).
+function paintRows(force) {
+  var L = $('list'); if (!view.length) return;
+  var top = L.getBoundingClientRect().top, vh = window.innerHeight;
+  var a = Math.max(0, Math.floor(-top / ROW_H) - 6), b = Math.min(view.length, Math.ceil((vh - top) / ROW_H) + 6);
+  var rows = L.__rows || (L.__rows = {});
+  Object.keys(rows).forEach(function (k) { if (force || k < a || k >= b) { if (rows[k].contains(document.activeElement) && !force) return; rows[k].remove(); delete rows[k]; } });
+  var frag = document.createDocumentFragment(), tmp = document.createElement('div');
+  for (var i = a; i < b; i++) if (!rows[i]) { tmp.innerHTML = rowHTML(view[i], i); rows[i] = tmp.firstChild; frag.appendChild(rows[i]); }
+  L.appendChild(frag);
+}
+var scrollRaf = 0;
+window.addEventListener('scroll', function () { if (!scrollRaf) scrollRaf = requestAnimationFrame(function () { scrollRaf = 0; paintRows(false); }); }, { passive: true });
+window.addEventListener('resize', function () { paintRows(true); });
+setInterval(function () { if ($('player').classList.contains('hidden') && view.length) paintRows(true); }, 60000); // progress bars
+function focusRow(i) {
+  i = Math.max(0, Math.min(view.length - 1, i)); var L = $('list'), y = L.offsetTop + i * ROW_H;
+  if (y < window.scrollY + 150) window.scrollTo(0, y - 150); else if (y + ROW_H > window.scrollY + window.innerHeight - 20) window.scrollTo(0, y + ROW_H - window.innerHeight + 20);
+  paintRows(false); var r = L.__rows && L.__rows[i]; if (r) r.focus({ preventScroll: true });
+}
+
+// ================= player =================
+var hls = null, hlsLoading = null, idleT = null;
+var nativeHls = !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
+function loadHlsJs() {
+  if (window.Hls) return Promise.resolve(window.Hls);
+  if (hlsLoading) return hlsLoading;
+  hlsLoading = new Promise(function (res, rej) { var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js'; s.onload = function () { res(window.Hls); }; s.onerror = rej; document.head.appendChild(s); });
+  return hlsLoading;
+}
+function msg(html) { $('pmsg').innerHTML = html || ''; }
+function streamError(c, why) {
+  var u = c.url, enc = encodeURIComponent(u), mixed = location.protocol === 'https:' && /^http:/i.test(u);
+  msg('<div class="err"><b>Sender lädt nicht</b>' + esc(mixed ? 'Der Stream ist http://, diese Seite https://. Safari und Chrome blockieren das. Öffne ihn in einer Player-App:' : (why || 'Der Stream ist offline, braucht ein anderes Format oder dein Anbieter sperrt Browser.')) +
+    '<div class="links"><a href="vlc-x-callback://x-callback-url/stream?url=' + enc + '">VLC</a><a href="infuse://x-callback-url/play?url=' + enc + '">Infuse</a><button id="p-copy">Link kopieren</button><button id="p-retry">Nochmal</button></div></div>');
+}
+function stopVideo() { var v = $('v'); if (hls) { try { hls.destroy(); } catch (e) {} hls = null; } v.removeAttribute('src'); try { v.load(); } catch (e) {} }
+async function play(list, idx) {
+  curList = list; curIdx = idx; var c = list[idx]; if (!c) return;
+  var P = $('player'), v = $('v'); P.classList.remove('hidden'); document.body.style.overflow = 'hidden';
+  $('p-name').textContent = c.name; $('p-grp').textContent = c.group || '';
+  $('p-logo').innerHTML = c.logo ? '<img referrerpolicy="no-referrer" src="' + esc(c.logo) + '" alt="" onerror="this.parentNode.style.display=\'none\'">' : ''; $('p-logo').style.display = c.logo ? '' : 'none';
+  $('p-fav').classList.toggle('on', !!favs[chKey(c)]); $('p-fav').style.color = favs[chKey(c)] ? 'var(--gold)' : '';
+  paintInfo(); wake();
+  var k = chKey(c); recent = [k].concat(recent.filter(function (x) { return x !== k; })).slice(0, 30); lsSet(REC_KEY, recent);
+  stopVideo(); msg('<div class="spin"></div>');
+  if (location.protocol === 'https:' && /^http:/i.test(c.url)) { streamError(c); return; }
+  var isHls = /\.m3u8(\?|$)/i.test(c.url) || !/\.(mp4|webm|mkv|ts|mp3|aac)(\?|$)/i.test(c.url);
+  try {
+    if (isHls && !nativeHls) {
+      var Hls = await loadHlsJs();
+      if (curIdx !== idx || curList !== list) return;
+      if (Hls && Hls.isSupported()) {
+        hls = new Hls({ enableWorker: true, lowLatencyMode: true, backBufferLength: 30 });
+        hls.on(Hls.Events.ERROR, function (_, d) { if (d && d.fatal) { if (d.type === Hls.ErrorTypes.NETWORK_ERROR && !hls.__retried) { hls.__retried = true; hls.startLoad(); } else streamError(c, d.details === 'manifestLoadError' ? 'Die Stream-Adresse antwortet nicht oder erlaubt keinen Browser-Zugriff (CORS).' : 'Fehler: ' + d.details); } });
+        hls.loadSource(c.url); hls.attachMedia(v);
+      } else v.src = c.url;
+    } else v.src = c.url;
+    var p = v.play(); if (p && p.catch) p.catch(function () { /* autoplay with sound blocked: user taps play */ msg('<button class="btn" id="p-tap" style="max-width:220px">▶︎ Abspielen</button>'); });
+  } catch (e) { streamError(c); }
+}
+function paintInfo() {
+  var c = curList && curList[curIdx]; if (!c) return;
+  var nn = epgFor(c), now = nn && nn.now, nx = nn && nn.next, hm = function (t) { var d = new Date(t); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  $('p-now').textContent = now ? hm(now.s) + '–' + hm(now.e) + '  ' + now.t : '';
+  $('p-next').textContent = nx ? 'Danach ' + hm(nx.s) + '  ' + nx.t : (now ? '' : 'Kein Programm verfügbar');
+  $('p-pg').style.display = now ? '' : 'none'; if (now) $('p-pg').firstChild.style.width = Math.max(0, Math.min(100, (Date.now() - now.s) / (now.e - now.s) * 100)) + '%';
+}
+function closePlayer() { stopVideo(); $('player').classList.add('hidden'); document.body.style.overflow = ''; try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} msg(''); var i = view.indexOf(curList && curList[curIdx]); if (i >= 0) focusRow(i); }
+function zap(d) { if (!curList || !curList.length) return; play(curList, (curIdx + d + curList.length) % curList.length); }
+function wake() { var P = $('player'); P.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(function () { if (!$('v').paused) P.classList.add('idle'); }, 4000); }
+(function videoEvents() {
+  var v = $('v');
+  v.addEventListener('playing', function () { msg(''); wake(); });
+  v.addEventListener('waiting', function () { if (!$('pmsg').querySelector('.err')) msg('<div class="spin"></div>'); });
+  v.addEventListener('error', function () { var c = curList && curList[curIdx]; if (c && !hls) streamError(c); });
+  if (window.WebKitPlaybackTargetAvailabilityEvent) v.addEventListener('webkitplaybacktargetavailabilitychanged', function (e) { $('p-air').classList.toggle('hidden', e.availability !== 'available'); });
+  if (document.pictureInPictureEnabled || v.webkitSupportsPresentationMode) $('p-pip').classList.remove('hidden');
+  setInterval(function () { if (!$('player').classList.contains('hidden')) paintInfo(); }, 30000);
+})();
+
+// ================= sources sheet =================
+var addType = 'url';
+function sheet(html) { $('sheet-in').innerHTML = html; $('sheet').classList.remove('hidden'); }
+function closeSheet() { $('sheet').classList.add('hidden'); }
+function ago(t) { if (!t) return 'nie'; var m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'gerade eben' : m < 60 ? 'vor ' + m + ' min' : m < 1440 ? 'vor ' + Math.round(m / 60) + ' h' : 'vor ' + Math.round(m / 1440) + ' Tagen'; }
+function sourcesSheet() {
+  var list = sources.map(function (s, i) {
+    return '<div class="src"><div class="ri"><b>' + esc(s.name) + '</b><small>' + (s.type === 'xtream' ? 'Xtream' : s.type === 'url' ? 'M3U-Link' : 'M3U-Datei') + ' · ' + (s.count || 0) + ' Sender · ' + ago(s.at) + (s.err ? ' · <span style="color:var(--red)">' + esc(s.err) + '</span>' : '') + '</small></div>' +
+      (s.type !== 'file' ? '<button class="mini" data-re="' + i + '">Neu laden</button>' : '') + '<button class="mini" data-del="' + i + '" style="color:var(--red)">✕</button></div>';
+  }).join('');
+  sheet('<div class="sh"><b>Quellen</b><button class="ibtn" data-close aria-label="Schließen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>' +
+    (list || '<div class="hint">Noch keine Quelle.</div>') +
+    '<div class="sect">Hinzufügen</div><div class="seg">' + [['url', 'M3U-Link'], ['file', 'Datei'], ['paste', 'Einfügen'], ['xtream', 'Xtream']].map(function (t) { return '<button data-type="' + t[0] + '" class="' + (addType === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+    addForm() +
+    '<button class="btn" id="s-add">Hinzufügen</button>' +
+    (sources.length ? '<button class="btn sec" id="s-epg">Programmführer neu laden</button>' : '') +
+    '<div class="hint" style="margin-top:14px">Zugangsdaten bleiben nur auf diesem Gerät. TangaTV liefert keine Sender: nutze nur Listen, die du legal empfangen darfst (z. B. freie Sender von iptv-org).</div>');
+}
+function addForm() {
+  var f = function (id, label, ph, type) { return '<div class="fld"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" placeholder="' + ph + '" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'; };
+  if (addType === 'xtream') return f('a-name', 'Name', 'Mein Anbieter') + f('a-host', 'Server', 'http://server.example:8080', 'url') + f('a-user', 'Benutzername', '') + f('a-pass', 'Passwort', '', 'password') + '<div class="hint">Sender kommen als HLS (.m3u8). Programmführer wird automatisch geladen.</div>';
+  if (addType === 'file') return f('a-name', 'Name', 'Meine Liste') + '<div class="fld"><label>M3U-Datei</label><input id="a-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl,application/x-mpegurl,text/plain,*/*"></div>' + f('a-epg', 'Programmführer (XMLTV, optional)', 'https://…/guide.xml.gz', 'url');
+  if (addType === 'paste') return f('a-name', 'Name', 'Meine Liste') + '<div class="fld"><label for="a-text">Playlist-Text</label><textarea id="a-text" rows="6" placeholder="#EXTM3U&#10;#EXTINF:-1 group-title=&quot;News&quot;,Sender&#10;https://…/index.m3u8"></textarea></div>';
+  return f('a-name', 'Name', 'Meine Liste') + f('a-url', 'Playlist-Adresse', 'https://…/playlist.m3u', 'url') + f('a-epg', 'Programmführer (XMLTV, optional)', 'kommt sonst aus der Playlist', 'url');
+}
+async function addSource() {
+  var v = function (id) { var e = $(id); return e ? e.value.trim() : ''; };
+  var src = { id: 's' + Date.now().toString(36), type: addType === 'paste' ? 'file' : addType, name: v('a-name') || '', epg: v('a-epg') };
+  if (addType === 'url') { src.url = v('a-url'); if (!src.url) return toast('Adresse fehlt'); src.name = src.name || (src.url.split('/').pop() || 'Playlist').replace(/\?.*$/, ''); }
+  else if (addType === 'xtream') { src.host = v('a-host'); src.user = v('a-user'); src.pass = $('a-pass').value; if (!src.host || !src.user) return toast('Server und Benutzername fehlen'); src.name = src.name || xtBase(src.host).replace(/^https?:\/\//, ''); }
+  else if (addType === 'paste') { src.text = $('a-text').value; if (!src.text.trim()) return toast('Kein Text'); src.name = src.name || 'Eingefügte Liste'; }
+  else { var file = $('a-file').files && $('a-file').files[0]; if (!file) return toast('Keine Datei gewählt'); src.text = await file.text(); src.name = src.name || file.name.replace(/\.m3u8?$/i, ''); }
+  var btn = $('s-add'); btn.textContent = 'Lade…'; btn.disabled = true;
+  try {
+    sources.push(src); var chs = await loadSource(src);
+    toast(chs.length + ' Sender geladen'); closeSheet(); await loadAll(); refreshEpg(true);
+  } catch (e) {
+    sources = sources.filter(function (s) { return s !== src; }); lsSet(SRC_KEY, sources);
+    btn.textContent = 'Hinzufügen'; btn.disabled = false;
+    toast(src.type === 'file' ? String(e.message || e) : whyFailed(src.url || xtBase(src.host), e), 7000);
+  }
+}
+async function reloadSource(i) {
+  var s = sources[i]; if (!s) return; toast('Lade ' + s.name + '…');
+  try { var n = (await loadSource(s)).length; toast(n + ' Sender'); }
+  catch (e) { s.err = 'Fehler'; lsSet(SRC_KEY, sources); toast(whyFailed(s.url || xtBase(s.host), e), 7000); }
+  await loadAll(); sourcesSheet();
+}
+async function delSource(i) {
+  var s = sources[i]; if (!s || !confirm('„' + s.name + '“ entfernen?')) return;
+  sources.splice(i, 1); lsSet(SRC_KEY, sources); await kvDel('list:' + s.id); await loadAll(); sourcesSheet();
+}
+async function addDemo() {
+  addType = 'url';
+  var src = { id: 's' + Date.now().toString(36), type: 'url', name: 'Freie Sender Deutschland (iptv-org)', url: 'https://iptv-org.github.io/iptv/countries/de.m3u', epg: '' };
+  toast('Lade freie Sender…', 8000);
+  try { sources.push(src); var chs = await loadSource(src); toast(chs.length + ' freie Sender geladen'); await loadAll(); }
+  catch (e) { sources = sources.filter(function (s) { return s !== src; }); lsSet(SRC_KEY, sources); toast('Konnte die Liste nicht laden: ' + (e.message || e), 6000); }
+}
+
+// ================= events =================
+document.addEventListener('click', function (e) {
+  var t = e.target.closest ? e.target.closest('button,[data-star],[data-close],a') : null; if (!t) return;
+  if (t.hasAttribute('data-star')) { e.stopPropagation(); var c = view[+t.getAttribute('data-star')]; if (c) { var k = chKey(c); if (favs[k]) delete favs[k]; else favs[k] = 1; lsSet(FAV_KEY, favs); t.classList.toggle('on', !!favs[k]); renderChips(); } return; }
+  if (t.hasAttribute('data-g')) { ui.group = t.getAttribute('data-g'); lsSet(UI_KEY, ui); window.scrollTo(0, 0); render(); return; }
+  if (t.hasAttribute('data-i')) { play(view, +t.getAttribute('data-i')); return; }
+  if (t.hasAttribute('data-close')) { closeSheet(); return; }
+  if (t.hasAttribute('data-type')) { addType = t.getAttribute('data-type'); sourcesSheet(); return; }
+  if (t.hasAttribute('data-re')) { reloadSource(+t.getAttribute('data-re')); return; }
+  if (t.hasAttribute('data-del')) { delSource(+t.getAttribute('data-del')); return; }
+  var v = $('v');
+  switch (t.id) {
+    case 'b-src': case 'e-add': sourcesSheet(); break;
+    case 'e-demo': addDemo(); break;
+    case 's-add': addSource(); break;
+    case 's-epg': lsSet('tangatv.epgAt', 0); refreshEpg(true); toast('Programmführer wird geladen…'); break;
+    case 'p-back': closePlayer(); break;
+    case 'p-prev': zap(-1); break;
+    case 'p-nextch': zap(1); break;
+    case 'p-retry': zap(0); break;
+    case 'p-tap': v.play(); msg(''); break;
+    case 'p-copy': var cu = curList && curList[curIdx]; if (cu) { try { navigator.clipboard.writeText(cu.url); toast('Link kopiert'); } catch (er) { prompt('Link', cu.url); } } break;
+    case 'p-mute': v.muted = !v.muted; toast(v.muted ? 'Ton aus' : 'Ton an', 1200); break;
+    case 'p-air': if (v.webkitShowPlaybackTargetPicker) v.webkitShowPlaybackTargetPicker(); break;
+    case 'p-pip': try { if (document.pictureInPictureElement) document.exitPictureInPicture(); else if (v.requestPictureInPicture) v.requestPictureInPicture(); else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'); } catch (er) {} break;
+    case 'p-full': try { var P = $('player'); if (document.fullscreenElement) document.exitFullscreen(); else if (P.requestFullscreen) P.requestFullscreen(); else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); } catch (er) {} break;
+    case 'p-fav': var pc = curList && curList[curIdx]; if (pc) { var pk = chKey(pc); if (favs[pk]) delete favs[pk]; else favs[pk] = 1; lsSet(FAV_KEY, favs); t.style.color = favs[pk] ? 'var(--gold)' : ''; render(); } break;
+  }
+});
+$('sheet').addEventListener('click', function (e) { if (e.target === $('sheet')) closeSheet(); });
+var qT = null; $('q').addEventListener('input', function () { clearTimeout(qT); qT = setTimeout(function () { window.scrollTo(0, 0); render(); }, 150); });
+// player: tap shows the controls, swipe up/down changes the channel
+(function gestures() {
+  var P = $('player'), y0 = null, t0 = 0;
+  P.addEventListener('pointerdown', function (e) { y0 = e.clientY; t0 = Date.now(); });
+  P.addEventListener('pointerup', function (e) {
+    if (y0 == null) return; var dy = e.clientY - y0; y0 = null;
+    if (Math.abs(dy) > 70 && Date.now() - t0 < 600 && !e.target.closest('button')) { zap(dy < 0 ? 1 : -1); return; }
+    if (!e.target.closest('button,a')) { if (P.classList.contains('idle')) wake(); else if (!$('v').paused) P.classList.add('idle'); }
+  });
+  P.addEventListener('pointermove', function (e) { if (e.pointerType === 'mouse') wake(); });
+})();
+// TV remotes (Fire TV, Samsung browser) and keyboards: arrows, OK, back
+document.addEventListener('keydown', function (e) {
+  var k = e.key, inPlayer = !$('player').classList.contains('hidden'), typing = /INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '');
+  if (inPlayer) {
+    if (k === 'ArrowUp' || k === 'ChannelUp' || k === 'PageUp') { e.preventDefault(); zap(-1); }
+    else if (k === 'ArrowDown' || k === 'ChannelDown' || k === 'PageDown') { e.preventDefault(); zap(1); }
+    else if (k === 'Escape' || k === 'Backspace' || k === 'GoBack' || k === 'BrowserBack' || e.keyCode === 10009) { e.preventDefault(); closePlayer(); }
+    else if (k === 'Enter' || k === ' ') { if (!e.target.closest || !e.target.closest('button')) { e.preventDefault(); wake(); } }
+    else wake();
+    return;
+  }
+  if (!$('sheet').classList.contains('hidden')) { if (k === 'Escape' || e.keyCode === 10009) closeSheet(); return; }
+  if (typing && k !== 'ArrowDown') return;
+  var cur = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-i');
+  if (k === 'ArrowDown') { e.preventDefault(); focusRow(cur == null ? 0 : +cur + 1); }
+  else if (k === 'ArrowUp') { if (cur != null) { e.preventDefault(); if (+cur === 0) $('q').focus(); else focusRow(+cur - 1); } }
+  else if ((k === 'ArrowLeft' || k === 'ArrowRight') && cur != null) {
+    e.preventDefault(); var chips = [].slice.call(document.querySelectorAll('.chip')), at = chips.findIndex(function (c) { return c.classList.contains('on'); });
+    var nx = chips[Math.max(0, Math.min(chips.length - 1, at + (k === 'ArrowRight' ? 1 : -1)))]; if (nx) { nx.click(); nx.scrollIntoView({ inline: 'center', block: 'nearest' }); setTimeout(function () { focusRow(0); }, 30); }
+  }
+});
+
+loadAll();
+})();
+</script>
+</body>
+</html>
